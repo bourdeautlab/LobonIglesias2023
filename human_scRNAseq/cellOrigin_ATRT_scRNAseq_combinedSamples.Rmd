@@ -1,0 +1,896 @@
+---
+title: "Human ATRT RNAseq data"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "cellOrigin_ATRT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+#pathToRpackages              <- paste0(pathToProgrammes,"Rpackages/")
+#pathToRpackages              <- paste0(pathToProgrammes,"Rpackages_R.3.6/")
+#pathToRpackages              <- paste0(pathToProgrammes,"Rpackages_R.3.5/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+pathToRNApip_RESULT          <- paste0(pathToThisProject,"RNApip_RESULT/")
+pathToFeatureCounts          <- paste0(pathToThisProject,"FeatureCounts_RESULT/")
+
+pathToRNApipResults          <-  paste0(pathToThisProject,"RNApip_RESULT/")
+
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("cellOrigin_ATRT_scRNAseq_combinedSamples.RData")
+
+#save.image(file="cellOrigin_ATRT_scRNAseq_combinedSamples.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+
+```
+
+```{r delete_all_objects}
+
+# Delete all objects
+rm(list = ls())
+
+```
+
+```{r paths}
+
+# def des path
+main_dir = "/data/kdi_prod/project_result/1002/02.00/svn/analyse/results/human_sample_merge"
+
+```
+
+```{r params}
+
+# def des paramètres
+select.dimension = 50
+nFeatures        = 2000
+
+```
+
+# Import and process individual sample seurat object
+
+```{r import_singleSample_seuratObject}
+
+Patient_IDs <- c("INI254","INI255","INI267")
+
+sampleSeuratObj_list <- list()
+for(sample in Patient_IDs)
+{
+    sampleSeuratObj = readRDS(file = file.path(main_dir, paste(sample, "Norm_features-mito.data.rds", sep = "_")))
+    
+    # Rename the cells
+    sampleSeuratObj <- RenameCells(object = sampleSeuratObj,
+                                   add.cell.id = sample
+                                   )
+
+                                        # Normalization (Log Normalize method)
+    sampleSeuratObj <- NormalizeData(object                = sampleSeuratObj,
+                                     normalization.method  = "LogNormalize",
+                                     scale.factor          = 1e4
+                                     )
+
+    # Variable features
+    sampleSeuratObj <- FindVariableFeatures(object = sampleSeuratObj, 
+                                            selection.method = 'vst', 
+                                            mean.cutoff = c(-Inf, Inf),
+                                            dispersion.cutoff = c(0.5, Inf),
+                                            nfeatures = nFeatures,
+                                            verbose = TRUE)
+
+    sampleSeuratObj_list[[length(sampleSeuratObj_list)+1]] <- sampleSeuratObj
+}
+names(sampleSeuratObj_list) <- Patient_IDs
+
+```
+
+# Data integration 
+
+```{r data_integration}
+
+# Find anchors (CCA)
+anchors <- FindIntegrationAnchors(object.list      = sampleSeuratObj_list,
+                                  anchor.features  = nFeatures,
+                                  dims             = 1:select.dimension
+                                  )
+anchors
+
+# Data integration 
+integratedData <- IntegrateData(anchorset  = anchors,
+                                dims       = 1:select.dimension
+                                )
+
+table(integratedData$sampleCond)
+table(integratedData$orig.ident)
+
+# Barplot of number of cell per sample
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA_numberOfCells.pdf"), width = 12, height = 12)
+table(integratedData$orig.ident) %>%
+    data.frame() %>%
+    ggplot(mapping = aes(x = Var1,
+                         y = Freq,
+                         fill = Var1
+                         )
+             ) +
+    geom_bar(stat = "identity") +
+    geom_text(mapping = aes(label = Freq),
+              size = 10,
+              fontface = "bold",
+              vjust = -0.25
+              ) +
+    xlab("\nTumor sample") +
+    ylab("# of cells\n") +
+theme_bw() +
+    theme(text = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+# Data scaling
+
+```{r data_scaling}
+
+# Scale data 
+all.genes <- rownames(integratedData@assays$RNA)
+integratedData <- ScaleData(object = integratedData,
+                            features = all.genes
+                            )
+```
+
+# Linear dimensional reduction
+
+```{r linear_dimensional_reduction}
+
+# Compute PCA
+integratedData <- RunPCA(integratedData,
+                         npcs = select.dimension
+                         )
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA.pdf"), width = 14, height = 10)
+DimPlot(object     = integratedData,
+        reduction  = "pca",
+        pt.size    = 2
+        ) +
+    theme_bw() +
+    theme(text = element_text(size = 40)
+          )
+#dev.off()
+
+# Plot heatmap of genes in PC1
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA.pdf"), width = 16, height = 10)
+DimHeatmap(object    = integratedData,
+           dims      = 1:10,
+           cells     = 500,
+           balanced  = TRUE,
+           ncol      = 5
+           )
+#dev.off()
+
+# Determine "singnificant" components by permutation 
+integratedData <- JackStraw(object         = integratedData,
+                            reduction      = "pca",
+                            dims           = select.dimension,
+                            num.replicate  = 100,
+                            prop.freq      = 0.01
+                            )
+
+integratedData <- ScoreJackStraw(object = integratedData,
+                                 dims   = 1:select.dimension
+                                 )
+
+#pdf(file = paste0(pathToFigures,"jakStrawPlot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA.pdf"), width = 12, height = 12)
+JackStrawPlot(object  = integratedData, dims = 1:select.dimension)
+#dev.off()
+
+# Determine "significant" components using heuristic method
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA.pdf"), width = 12, height = 12)
+ElbowPlot(object     = integratedData,
+          ndims      = select.dimension,
+          reduction  = "pca"
+          ) +
+    theme_bw() +
+    theme(text = element_text(size = 40)
+          )
+#dev.off()
+
+choosenDim <- 1:10
+
+```
+
+# Cell clustering 
+
+## Clustering
+
+```{r clustering}
+
+# Construct KNN graph 
+integratedData <- FindNeighbors(object  = integratedData,
+                                dims    = choosenDim,
+                                assay   = "integrated"
+                                )
+
+# Clustering by modularity optimization technique
+integratedData <- FindClusters(object     = integratedData,
+                               resolution = seq(from  = 0,
+                                                to    = 2,
+                                                by    = 0.1
+                                                )
+                               )
+
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA.pdf"), width = 10, height = 12)
+clustree(x               = integratedData@meta.data,
+         prefix          = "integrated_snn_res.",
+         node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE
+         )
+#dev.off()
+
+choosenResolution <- 0.9
+
+```
+
+## Cluster visualization
+
+```{r clusterVisualization}
+
+# Run UMAP
+integratedData <- RunUMAP(object       = integratedData,
+                          dims         = choosenDim,
+                          n.neighbors  = 30
+                          )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA.pdf"), width = 12, height = 12)
+DimPlot(object      = integratedData,
+        reduction   = "umap",
+        pt.size     = 2,
+        group.by    = paste0("integrated_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 10
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Extract cluster average expression of scaled matrix
+
+```{r extract_average_matrix}
+
+# Find cluster for choosen resolution
+integratedData_choosenDim <- FindClusters(object = integratedData,
+                                          resolution = choosenResolution
+                                          )
+
+# Extract matrix
+matrix_integratedData_choosenDim <- AverageExpression(object = integratedData_choosenDim,
+                                                      assays = "RNA",
+                                                      features.assay = "RNA",
+                                                      features = all.genes,
+                                                      )$RNA
+
+head(matrix_integratedData_choosenDim[,1:4])
+nrow(matrix_integratedData_choosenDim)
+
+# Export matrix
+write.table(x      = matrix_integratedData_choosenDim,
+            file   = paste0(pathToReport,"matrix_integratedData_ATRT_SHH_anteriorVermis.txt"),
+            sep    = "\t",
+            quote  = FALSE
+            )
+
+```
+
+## Number of cell per cluster
+
+```{r numberOfCellPerCluster}
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = integratedData_choosenDim@meta.data
+       ) +
+    stat_count(mapping = aes(x     = integrated_snn_res.0.9,
+                             fill  = orig.ident
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = integrated_snn_res.0.9,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              face     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+```
+
+# Differential analysis
+
+## One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+DefaultAssay(integratedData_choosenDim) <- "RNA"
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.5
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Find markers for each cluster (versus all others)
+integratedData_choosenDim.markers <- FindAllMarkers(object            = integratedData_choosenDim,
+                                                    min.pct           = min_pct,
+                                                    logfc.threshold   = min_logfc,
+                                                    min.diff.pct      = min_diffPct,
+                                                    only.pos          = TRUE,
+                                                    min.cells.feature = min_cellsFeature
+                                                    )
+
+head(integratedData_choosenDim.markers)
+nrow(integratedData_choosenDim.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = integratedData_choosenDim.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10,
+              face = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+
+# Export marker table
+write.table(x           = integratedData_choosenDim.markers,
+            file        = paste0(pathToReport,"scRNAseq_ATRT_SHH_anteriorVermis_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = integratedData_choosenDim,
+          features = integratedData_choosenDim.markers$gene,
+          assay    = "integrated"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+integratedData_choosenDim.topMarkers <- integratedData_choosenDim.markers %>%
+    group_by(cluster) %>%
+    top_n(n = nTop, wt = avg_logFC)
+integratedData_choosenDim.topMarkers
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_CCA_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = integratedData_choosenDim,
+          features = integratedData_choosenDim.topMarkers$gene,
+          assay    = "integrated"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=20))
+#dev.off()
+
+```
+
+# Cell type identification
+
+## Tumor cells identification
+
+### Import and explore cell types database
+
+```{r importCellTypeMarkers}
+
+# Import cannonical and published cell type markers
+cellType_markers <- read.table(file    = "/data/users/mandrian/rhabdoid_U830_projects/annotation_file/cellType_markers.csv",
+                               header  = TRUE,
+                               sep     = "\t"
+                               )
+head(cellType_markers)
+
+# Gene markers per cell type
+group_by(.data = filter(cellType_markers,
+                        Cell.type == "Microglia"
+                        )
+         #,Cell.type
+         ,Source
+         ) %>%
+    summarise(number = n()) %>%
+    print(n=nrow(.), width = Inf)
+
+```
+
+### Import and explore geneSet database
+
+```{r importCellTypeMarkers}
+
+# Import genSet
+geneSet <- read.table(file    = "/data/users/mandrian/rhabdoid_U830_projects/geneSet.csv",
+                               header  = TRUE,
+                               sep     = ";"
+                               )
+head(geneSet)
+
+# Gene markers per cell type
+group_by(.data = geneSet,
+         #,Cell.type
+         ,Group
+         ) %>%
+    summarise(number = n()) %>%
+    print(n=nrow(.), width = Inf)
+
+```
+
+### ATRT SHH signature expression
+
+```{r SHH_markers_expression}
+
+# Select SHH gene signatures
+geneSet_ATRT_SHH <- filter(.data = geneSet,
+                           Group == "ATRT_SHH(1)"
+                           )
+
+nrow(geneSet_ATRT_SHH)
+
+as.vector(geneSet_ATRT_SHH$Gene)
+
+# ATRT SHH signature gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_ATRT_SHH_genes.pdf"), width = 14, height = 10)
+FeaturePlot(object   = integratedData_choosenDim,
+            features = as.vector(geneSet_ATRT_SHH$Gene),
+            pt.size  = 0.25
+            ) #+
+    #ggtitle(label = "SMARCB1") +
+    #theme_bw() +
+    #theme(legend.position = "none",
+          #text = element_text(size = 20),
+          #plot.title = element_text(hjust = 0.5, face = "bold")
+          #)
+#dev.off()
+
+# ATRT SHH signature gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_ATRT_SHH_genes.pdf"), width = 16, height = 8)
+VlnPlot(object   = integratedData_choosenDim,
+        features = as.vector(geneSet_ATRT_SHH$Gene)
+        ) #+
+    #ggtitle(label = "SMARCB1") +
+    #xlab("\nCluster") +
+    #theme_bw() +
+    #theme(legend.position = "none",
+          #text = element_text(size = 20),
+          #plot.title = element_text(hjust = 0.5, face = "bold")
+          #)
+#dev.off()
+
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = integratedData_choosenDim,
+            features = "SMARCB1",
+            pt.size  = 2
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_SMARCB1.pdf"), width = 16, height = 8)
+VlnPlot(object   = integratedData_choosenDim,
+        features = "SMARCB1"#,
+        #pt.size  = 2
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+### Canonical markers expression
+
+#### Immune cells canonical markers
+
+```{r immuneCells}
+
+# Select immune cells canonical markers
+cellType_markers_immuneCell_canonical <- filter(.data = cellType_markers,
+                                                Source == "canonical marker",
+                                                Group == "immune cells",
+                                                Organism == "human"
+                                                )
+
+
+as.vector(cellType_markers_immuneCell_canonical$Gene)
+
+
+#!!!!!!!!!!!!!!!!!!!!!
+max(as.matrix(log2(matrix_integratedData_choosenDim+1)))
+
+# Subset average matrix of immune cell maker genes
+matrix_integratedData_choosenDim_immuneCellMarkers <- matrix_integratedData_choosenDim[rownames(matrix_integratedData_choosenDim) %in% as.vector(cellType_markers_immuneCell_canonical$Gene),]
+
+head(matrix_integratedData_choosenDim_immuneCellMarkers)
+
+col_fun <- circlize::colorRamp2(breaks = c(0,0.5,10), colors = c("white","grey","black"))
+
+# Circle heatmap of average expression
+pdf(file = paste0(pathToFigures,"circleHeatmap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_immuneCells_canonicalMarkers.pdf"), width = 16, height = 10)
+Heatmap(matrix = matrix_integratedData_choosenDim_immuneCellMarkers,
+        col = col_fun,
+        rect_gp = gpar(type="none"),
+        cluster_columns = FALSE,
+        cluster_rows = FALSE,
+        show_row_names = TRUE,
+        cell_fun = function(j, i, x, y, width, height, fill)
+        {
+            grid.rect(x = x, y = y, width = width, height = height, gp = gpar(col = "grey", fill = NA))
+            grid.circle(x = x, y = y, r = (matrix_integratedData_choosenDim_immuneCellMarkers[i,j]+1)/10*min(unit.c(width, height)),
+                        gp = gpar(fill = col_fun(matrix_integratedData_choosenDim_immuneCellMarkers[i,j]), col = "black")
+                        )
+        }
+        )
+dev.off()
+
+# Heatmap of average expression
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_immuneCells_canonicalMarkers.pdf"), width = 16, height = 10)
+FeaturePlot(object   = integratedData_choosenDim,
+            features = unique(as.vector(cellType_markers_immuneCell_canonical$Gene)),
+            pt.size  = 0.25
+            ) #+
+    #ggtitle(label = "SMARCB1") +
+    #theme_bw() +
+    #theme(legend.position = "none",
+          #text = element_text(size = 20),
+          #plot.title = element_text(hjust = 0.5, face = "bold")
+          #)
+#dev.off()
+
+```
+
+# Create human-mouse gene name conversion
+
+```{r human_mouse_conversion}
+
+# Load human and mouse ensembl datasets annotation
+human <- useMart(biomart="ensembl", dataset="hsapiens_gene_ensembl")
+mouse <- useMart(biomart="ensembl", dataset="mmusculus_gene_ensembl")
+
+# Create human gene symbol and mouse orthologous gene symbol corresponding table
+symbols_conversion <- getLDS(attributes  = c("hgnc_symbol"),
+                             mart        = human,
+                             attributesL = "mgi_symbol",
+                             martL       = mouse,
+                             uniqueRows  = TRUE
+                             )
+head(symbols_conversion)
+
+# Add mouse orthologous gene symbol
+integratedData_choosenDim.markers_plus <- merge(x      = integratedData_choosenDim.markers,
+                                                y      = symbols_conversion,
+                                                by.x   = "gene",
+                                                by.y   = "HGNC.symbol",
+                                                all.x  = TRUE,
+                                                all.y  = FALSE
+                                                )
+head(integratedData_choosenDim.markers_plus)
+
+```
+
+
+#### Microglia gene set from Jessa2019
+
+```{r immuneCells}
+
+head(cellType_markers)
+
+# Select immune cells canonical markers
+cellType_markers_Microglia_Jessa2019 <- filter(.data      = cellType_markers,
+                                               Source     == "Jessa et al., 2019",
+                                               Cell.type  == "Microglia",
+                                               Organism   == "murine"
+                                               )
+
+
+
+head(cellType_markers_Microglia_Jessa2019$Gene)
+
+levels(integratedData_choosenDim.markers$cluster)
+
+cluster <- vector()
+k <- vector()
+K <- vector()
+pVal <- vector()
+for (clust in levels(integratedData_choosenDim.markers$cluster))
+{
+    g <- filter(.data    = integratedData_choosenDim.markers_plus,
+                cluster  == clust
+                )$MGI.symbol
+    K <- c(K,length(g))
+    G <- as.vector(cellType_markers_Microglia_Jessa2019$Gene)
+    # Intersect cluster gene markers and cell type markers
+    gG <- intersect(g,G)
+    k <- c(k,length(gG))
+    # Hypergeometric test
+    p <- computeHypergeometrix_pval(x = g,
+                                    y = G,
+                                    N = nrow(integratedData_choosenDim)
+                                    )
+    pVal <- c(pVal,p)
+    cluster <- c(cluster,clust)
+}
+overlap_integratedData_markers_Microglia_Jessa2019 <- data.frame(cluster,k,K,pVal)
+
+# Compute q values
+overlap_integratedData_markers_Microglia_Jessa2019$qVal <- qvalue(p = overlap_integratedData_markers_Microglia_Jessa2019$pVal)$qvalues
+overlap_integratedData_markers_Microglia_Jessa2019
+
+# Keep cluster order for ggplot
+overlap_integratedData_markers_Microglia_Jessa2019$cluster <- factor(overlap_integratedData_markers_Microglia_Jessa2019$cluster,
+                                                                     levels = overlap_integratedData_markers_Microglia_Jessa2019$cluster
+                                                                     )
+
+# Plot barplot
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_markers_Microglia_Jessa2019.pdf"), width = 16, height = 8)
+ggplot(data    = overlap_integratedData_markers_Microglia_Jessa2019,
+       mapping = aes(x = cluster,
+                     y = -log10(qVal)
+                     )
+       ) +
+    geom_bar(stat = "identity",
+             fill = "brown"
+             ) +
+    #coord_flip() +
+    xlab("\nCluster") +
+    ylab("-log10(q-value)\n") +
+    #ylim(0,xlim) +
+    #geom_text(mapping = aes(label=paste0("(",k,"/",K,")")),
+     #         size = 10,
+      #        hjust = -0.1
+       #       ) +
+    theme_bw() +
+    theme(text         = element_text(size=40, color = "black"),
+          panel.border = element_blank(),
+          axis.text.x  = element_text(color = "black")
+          )
+#dev.off()
+
+```
+
+### Microglia marker Soussa2017
+
+```{r SMARCB1_expression}
+
+# Select immune cells canonical markers
+cellType_markers_Microglia_Soussa2017 <- filter(.data = cellType_markers,
+                                                Source == "Sousa et al., 2017",
+                                                Cell.type == "Microglia",
+                                                Organism == "murine"
+                                                )
+
+
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_Microglia_Soussa2017.pdf"), width = 12, height = 12)
+FeaturePlot(object   = integratedData_choosenDim,
+            features = symbols_conversion[symbols_conversion$MGI.symbol == cellType_markers_Microglia_Soussa2017$Gene,"HGNC.symbol"],
+            pt.size  = 2
+            ) +
+    #ggtitle(label = "") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_Microglia_Soussa2017.pdf"), width = 16, height = 8)
+VlnPlot(object   = integratedData_choosenDim,
+        features = symbols_conversion[symbols_conversion$MGI.symbol == cellType_markers_Microglia_Soussa2017$Gene,"HGNC.symbol"]
+        ) +
+    #ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+
+#### Microglia gene set from Zhang2014
+
+```{r immuneCells}
+
+head(cellType_markers)
+
+# Select immune cells canonical markers
+cellType_markers_Microglia_Zhang2014 <- filter(.data = cellType_markers,
+                                               Source == "Zhang et al., 2014",
+                                               Cell.type == "Microglia",
+                                               Organism == "murine"
+                                               )
+
+
+length(cellType_markers_Microglia_Zhang2014$Gene)
+
+cluster <- vector()
+k <- vector()
+K <- vector()
+pVal <- vector()
+for (clust in levels(integratedData_choosenDim.markers$cluster))
+{
+    g <- filter(.data    = integratedData_choosenDim.markers_plus,
+                cluster  == clust
+                )$MGI.symbol
+    K <- c(K,length(g))
+    G <- as.vector(cellType_markers_Microglia_Zhang2014$Gene)
+    # Intersect cluster gene markers and cell type markers
+    gG <- intersect(g,G)
+    k <- c(k,length(gG))
+    # Hypergeometric test
+    p <- computeHypergeometrix_pval(x = g,
+                                    y = G,
+                                    N = nrow(integratedData_choosenDim)
+                                    )
+    pVal <- c(pVal,p)
+    cluster <- c(cluster,clust)
+}
+overlap_integratedData_markers_Microglia_Zhang2014 <- data.frame(cluster,k,K,pVal)
+
+# Compute q values
+overlap_integratedData_markers_Microglia_Zhang2014$qVal <- qvalue(p = overlap_integratedData_markers_Microglia_Zhang2014$pVal)$qvalues
+
+overlap_integratedData_markers_Microglia_Zhang2014
+
+# Keep cluster order for ggplot
+overlap_integratedData_markers_Microglia_Zhang2014$cluster <- factor(overlap_integratedData_markers_Microglia_Zhang2014$cluster,
+                                                                     levels = overlap_integratedData_markers_Microglia_Zhang2014$cluster
+                                                                     )
+
+# Plot barplot
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integratedData_ATRT_SHH_VermisAnterior_markers_Microglia_Zhang2014.pdf"), width = 16, height = 10)
+ggplot(data    = overlap_integratedData_markers_Microglia_Zhang2014,
+       mapping = aes(x = cluster,
+                     y = -log10(qVal)
+                     )
+       ) +
+    geom_bar(stat = "identity",
+             fill = "brown"
+             ) +
+    #coord_flip() +
+    xlab("\nCluster") +
+    ylab("-log10(q-value)\n") +
+    #ylim(0,xlim) +
+    #geom_text(mapping = aes(label=paste0("(",k,"/",K,")")),
+     #         size = 10,
+      #        hjust = -0.1
+       #       ) +
+    theme_bw() +
+    theme(text         = element_text(size=40, color = "black"),
+          panel.border = element_blank(),
+          axis.text.x  = element_text(color = "black")
+          )
+#dev.off()
+
+```
+
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

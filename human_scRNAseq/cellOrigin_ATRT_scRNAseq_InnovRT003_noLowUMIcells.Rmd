@@ -1,0 +1,1271 @@
+---
+title: "Human ATRT RNAseq data"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "cellOrigin_ATRT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+#pathToRpackages              <- paste0(pathToProgrammes,"Rpackages/")
+#pathToRpackages              <- paste0(pathToProgrammes,"Rpackages_R.3.6/")
+#pathToRpackages              <- paste0(pathToProgrammes,"Rpackages_R.3.5/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+pathToRNApip_RESULT          <- paste0(pathToThisProject,"RNApip_RESULT/")
+pathToFeatureCounts          <- paste0(pathToThisProject,"FeatureCounts_RESULT/")
+
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("cellOrigin_ATRT_scRNAseq_InnovRT003_noLowUMIcells.RData")
+
+#save.image(file="cellOrigin_ATRT_scRNAseq_InnovRT003_noLowUMIcells.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+source("scRNAseq_functions.R")
+
+```
+
+```{r delete_all_objects}
+
+# Delete all objects
+#rm(list = ls())
+
+```
+
+# InnovRT003 scRNA-seq
+
+## Load data and create Seurat object
+
+```{r load_data}
+
+pathTo_InnovRT003_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/InnovRT-003_count/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+scRNAseq_data_InnovRT003_raw <- Read10X(data.dir         = pathTo_InnovRT003_cellRangerCount,
+                                        gene.column      = 2,
+                                        unique.features  = TRUE
+                                        )
+
+# Create Seurat object
+scRNAseq_Seurat_InnovRT003_raw <- CreateSeuratObject(counts   = scRNAseq_data_InnovRT003_raw,
+                                                     project  = "InnovRT003"
+                                                     )
+
+# Check Seurat object 
+scRNAseq_Seurat_InnovRT003_raw
+
+# Export meta data for all cells (before filtering)
+write.table(x      = scRNAseq_Seurat_InnovRT003_raw@meta.data,
+            file   = "scRNAseq_Seurat_InnovRT003_raw_metadata.txt",
+            quote  = FALSE,
+            sep    = ","
+            )
+
+```
+
+## Cell quality control and filtering
+
+### Adding QC metrics
+
+```{r mito_ribo_reads_fraction}
+
+# Log10 number of UMIs
+scRNAseq_Seurat_InnovRT003_raw[["log10_nCount_RNA"]] <- log10(scRNAseq_Seurat_InnovRT003_raw@meta.data$nCount_RNA)
+
+# Log10 number of UMIs
+scRNAseq_Seurat_InnovRT003_raw[["nCount_per_Feature"]] <- scRNAseq_Seurat_InnovRT003_raw@meta.data$nCount_RNA/scRNAseq_Seurat_InnovRT003_raw@meta.data$nFeature_RNA
+
+# Ribosomal protein reads fraction
+scRNAseq_Seurat_InnovRT003_raw[["percent.riboProt"]] <- PercentageFeatureSet(object  = scRNAseq_Seurat_InnovRT003_raw,
+                                                                         pattern = "^RP[LS].*",
+                                                                         assay   = "RNA"
+                                                                         )
+# Mitocondrial genes percentage
+scRNAseq_Seurat_InnovRT003_raw[["percent.mito"]] <- PercentageFeatureSet(object   = scRNAseq_Seurat_InnovRT003_raw,
+                                                                     pattern  = "^MT-",
+                                                                     assay    = "RNA"
+                                                                     )
+
+# Check meta data
+head(scRNAseq_Seurat_InnovRT003_raw@meta.data)
+
+```
+
+### Number of RNA (UMIs)
+
+ ```{r number_of_rna}
+
+# Density distribution of total RNA count
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_Seurat_InnovRT003_noLowUMIcells_nbRNA.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_InnovRT003_raw@meta.data) +
+    geom_histogram(mapping  = aes(x = nCount_RNA),
+                   fill     = "yellow",
+                   color    = "black",
+                   binwidth = 1000
+                   ) +
+    xlab(label = "\nnb of RNA (UMI)") +
+    ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Identify nb UMI threshold
+log_nbUMI_thrs <- density(scRNAseq_Seurat_InnovRT003_raw@meta.data$log10_nCount_RNA)$x[which(diff(sign(diff(density(scRNAseq_Seurat_InnovRT003_raw@meta.data$log10_nCount_RNA)$y)))==2)]
+log_nbUMI_thrs
+
+# Density distribution of detected genes
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_Seurat_InnovRT003_noLowUMIcells_log_nbRNA.pdf"), width = 14, height = 12)
+ggplot() +
+    geom_density(data = scRNAseq_Seurat_InnovRT003_raw@meta.data,
+                 mapping = aes(x = log10_nCount_RNA),
+                 fill = "blue",
+                 color = "black"
+                 ) +
+    xlab(label = "\nlog(nb UMIs)") +
+    ylab(label = "density\n") +
+    #scale_y_reverse() +
+    xlim(7,10.5) +
+    geom_vline(xintercept = log_nbUMI_thrs, color = "red", lty = 2, size = 2) +
+    scale_x_continuous(breaks = c(7,8,round(log_nbUMI_thrs,2),9,10,11)) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.text.x = element_text(color = c("grey30","grey30","red","grey30","grey30","grey30"),
+                                     face = c("plain","plain","bold","plain","plain","plain")
+                                     ),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Filter out necrotic cells using the nb RNA distribution
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw <- subset(x      = scRNAseq_Seurat_InnovRT003_raw,
+                                                       subset = log10_nCount_RNA > log_nbUMI_thrs
+                                                       )
+
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw
+
+```
+
+
+### Number of detected genes and number of RNA (UMIs)
+
+```{r number_of_genes_per_cell}
+
+# Set minimum number of genes
+min_nFeature <- round(quantile(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw@meta.data$nFeature_RNA,
+                               probs = 0.05
+                               )
+                      )
+min_nFeature
+
+# Plot histogram of RNA count
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_InnovRT003_noLowUMIcells_nbRNA.pdf"), width = 12, height = 12)
+plot_histogram_nbRNA(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw, log = 10, binwidth=0.05)
+#dev.off()
+
+# Plot density distribution of total RNA count
+#pdf(file = paste0(pathToFigures,"density_scRNAseq_InnovRT003_noLowUMIcells_nbRNA.pdf"), width = 12, height = 12)
+plot_density_nbRNA(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw, log = 10)
+#dev.off()
+
+# Plot histogram of total RNA count
+#pdf(file = paste0(pathToFigures,"density_scRNAseq_InnovRT003_noLowUMIcells_nbGenes.pdf"), width = 12, height = 12)
+plot_histogram_nbGenes(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw, log = 10, binwidth=0.05)
+#dev.off()
+
+# Plot density distribution of total RNA count
+#pdf(file = paste0(pathToFigures,"density_scRNAseq_InnovRT003_noLowUMIcells_nbGenes.pdf"), width = 12, height = 12)
+plot_density_nbGenes(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw, log = 10)
+#dev.off()
+
+# Plot scatter plot nCount_RNA and nFeature_RNA
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_InnovRT003_noLowUMIcells_nbRNA_vs_nbGene.pdf"), width = 12, height = 12)
+plot_nbRNA_vs_nbGenes(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw, min_nbGene = min_nFeature)
+#dev.off()
+
+# Density distribution of the number of UMIs per gene
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_InnovRT003_noLowUMIcells_nbRNA_per_gene.pdf"), width = 12, height = 12)
+plot_distribution_nbRNA_per_Gene(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw)
+#dev.off()
+
+```
+
+### Fraction of reads mapped to mitochondrial genes
+
+```{r mitochondrial_gene}
+
+# Set percentage of count falling in mitochondrial genes
+maxPercentMito <- 7.5
+
+# Scatter plot of nb of RNA and percent of mitochondrial RNA
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_InnovRT003_noLowUMIcells_nbRNA_vs_percMito.pdf"), width = 12, height = 12)
+plot_nbRNA_vs_percentMito(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw,
+                          maxPercentMito = maxPercentMito
+                          )
+#dev.off()
+
+```
+
+### Fraction of reads mapped to ribosomal protein genes
+
+```{r ribosomal_gene}
+
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_InnovRT003_noLowUMIcells_percRiboProt_vs_nbUMIs.pdf"), width = 12, height = 12)
+plot_percentRibo_vs_nbUMIs(scRNAseq_Seurat_InnovRT003_raw, min_nbUMIs = round(10^log_nbUMI_thrs))
+#dev.off()
+
+# Scatter plot nb of genes and fraction of reads map to ribosomal proteins
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_InnovRT003_noLowUMIcells_percRiboProt_vs_nbGene.pdf"), width = 12, height = 12)
+plot_percentRibo_vs_nbGene(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw, min_nbGene = min_nFeature)
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_InnovRT003_noLowUMIcells_percRiboProt_vs_percMito.pdf"), width = 12, height = 12)
+plot_percentRibo_vs_percentMito(scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw, min_nbGene = min_nFeature, max_percMito = maxPercentMito)
+#dev.off()
+
+```
+
+## Cell filtering
+
+```{r cell_filtering}
+
+# Subset "good" cells
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- subset(x      = subset(x      = scRNAseq_Seurat_InnovRT003_noLowUMIcells_raw,
+                                                                   subset = nFeature_RNA > min_nFeature
+                                                                   ),
+                                                   subset = percent.mito < maxPercentMito
+                                                   )
+
+# Plot histogram of nb of cells after each filtering step
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_InnovRT003_noLowUMIcells_cellFiltering_nbGenes_percMito.pdf"), width = 12, height = 8)
+barplot_cellfiltering(scRNAseq_Seurat_InnovRT003_raw, min_nbUMIs = 10^log_nbUMI_thrs, maxPercentMito = maxPercentMito, min_nFeature = min_nFeature, ylim = 7000)
+#dev.off()
+
+```
+
+## Data normalization
+
+```{r data_normalization}
+
+# Normalization
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- NormalizeData(object                = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                          normalization.method  = "LogNormalize",
+                                                          scale.factor          = 10000
+                                                          )
+
+```
+
+# Assign cell-cycle scores
+
+```{r assign_cellCycle_scores}
+
+# Cell cycle gene markers (present in Seurat)
+str(cc.genes)
+length(cc.genes$s.genes)
+length(cc.genes$g2m.genes)
+
+cc.genes$g2m.genes
+cc.genes$s.genes
+
+# Compute cell cycle scoring  
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- CellCycleScoring(object       = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                             s.features   = cc.genes$s.genes,
+                                                             g2m.features = cc.genes$g2m.genes
+                                                             )
+
+# Check meta data
+head(scRNAseq_Seurat_InnovRT003_noLowUMIcells@meta.data)
+
+#pdf(file = paste0(pathToFigures,"plots_cellCyclPhase_scRNAseq_InnovRT003_noLowUMIcells.pdf"), width = 16, height = 12)
+plot_cellCyclePhase(scRNAseq_Seurat_InnovRT003_noLowUMIcells)
+#dev.off()
+
+```
+
+
+## Dimensionality reduction (PCA)
+
+```{r feature_selection}
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- FindVariableFeatures(object            = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                   selection.method  = variableFeatures_method,
+                                                   nfeatures         = nFeatures
+                                                   )
+
+# Mean-variance scatter plot
+#pdf(file = paste0(pathToFigures,"variableFeaturePlot_scRNAseq_InnovRT003_noLowUMIcells.pdf"), width = 12, height = 12)
+VariableFeaturePlot(scRNAseq_Seurat_InnovRT003_noLowUMIcells) +
+    xlab("\nAverage Expression") +
+    ylab("Standard Deviation\n") +
+        theme_bw() +
+        theme(text = element_text(size = 30),
+              axis.title = element_text(size = 30, face = "bold"),
+              legend.position = c(0.9,0.8)
+              )
+#dev.off()
+
+# Data scaling 
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- ScaleData(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                      features = rownames(scRNAseq_Seurat_InnovRT003_noLowUMIcells)
+                                                      )
+
+# PCA
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- RunPCA(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells)
+
+# PCs elbow plot
+PCmin <- 31
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_InnovRT003_noLowUMIcells_PCA.pdf"), width = 12, height = 12)
+ElbowPlot(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+          ndims = 50
+          ) +
+    geom_vline(xintercept = PCmin, lty = 2, color = "blue") +
+    xlab("\nPC") +
+    ylab("Standard Deviation\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Heatmap of each PC
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_InnovRT003_noLowUMIcells_PCA.pdf"), width = 15, height = 11)
+DimHeatmap(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+           dims = 1:15,
+           ncol = 5
+           )
+#dev.off()
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_InnovRT003_noLowUMIcells_PCA.pdf"), width = 12, height = 12)
+DimPlot(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        pt.size = 2,
+        reduction = "pca",
+        cols = rep("black",length(levels(Idents(scRNAseq_Seurat_InnovRT003_noLowUMIcells))))
+        ) +
+    xlab("\nPC_1") +
+    ylab("PC_2\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+## Plot PCA and covariates
+
+```{r PCA_and_covariates}
+
+str(scRNAseq_Seurat_InnovRT003_noLowUMIcells)
+
+# Extract scaled matrix
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_scaled_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                               slot = "scale.data"
+                                                               )
+                                                  )
+head(scRNAseq_Seurat_InnovRT003_noLowUMIcells_scaled_matrix[,1:3])
+
+# Get HVF
+head(scRNAseq_Seurat_InnovRT003_noLowUMIcells$RNA@var.features)
+length(scRNAseq_Seurat_InnovRT003_noLowUMIcells$RNA@var.features)
+
+mvGenes <- scRNAseq_Seurat_InnovRT003_noLowUMIcells$RNA@var.features
+
+# Subset matrix
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_scaled_matrix_mvGenes <- scRNAseq_Seurat_InnovRT003_noLowUMIcells_scaled_matrix[mvGenes,]
+nrow(scRNAseq_Seurat_InnovRT003_noLowUMIcells_scaled_matrix_mvGenes)
+
+# PCA analysis
+PC        <- prcomp(data.frame(t(scRNAseq_Seurat_InnovRT003_noLowUMIcells_scaled_matrix_mvGenes)))
+eigVal    <- get_eigenvalue(PC)
+eigValPer <- round(eigVal$variance.percent, digits = 2)
+
+pci       <- data.frame(PC$x,scRNAseq_Seurat_InnovRT003_noLowUMIcells@meta.data)
+
+# Plot eigen value
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_InnovRT003_noLowUMIcells_PCA_eigValPer.pdf"), width = 12, height = 12)
+ggplot() +
+    geom_bar(data = data.frame(PC = 1:50, eigValPer = eigValPer[1:50]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity"
+             ) +
+    geom_bar(data = data.frame(PC = 1:PCmin, eigValPer = eigValPer[1:PCmin]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity",
+             fill = "blue"
+             ) +
+    xlab(label = "\nPC") +
+    ylab(label = "% variability (eigen value)\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Plot PCA and nb of UMIs
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_InnovRT003_noLowUMIcells_PCA_nbUMIs.pdf"), width = 12, height = 10)
+plot_PCA_and_covariate(pci = pci, covariate = "log10_nCount_RNA", legendTitle = "log10(nbUMIs)")
+#dev.off()
+
+# Plot PCA and nb of genes
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_InnovRT003_noLowUMIcells_PCA_nbGenes.pdf"), width = 12, height = 10)
+plot_PCA_and_covariate(pci = pci, covariate = "nFeature_RNA", legendTitle = "nbGenes")
+#dev.off()
+
+# Plot PCA and nb RNA per gene
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_InnovRT003_noLowUMIcells_PCA_nbRNA_per_gene.pdf"), width = 12, height = 10)
+plot_PCA_and_covariate(pci = pci, covariate = "nCount_per_Feature", legendTitle = "UMIs/gene")
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_InnovRT003_noLowUMIcells_PCA_percMito.pdf"), width = 12, height = 10)
+plot_PCA_and_covariate(pci = pci, covariate = "percent.mito", legendTitle = "% mito")
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_InnovRT003_noLowUMIcells_PCA_percRiboProt.pdf"), width = 12, height = 10)
+plot_PCA_and_covariate(pci = pci, covariate = "percent.riboProt", legendTitle = "% riboProt")
+#dev.off()
+
+# Plot PCA and cell cycle phase
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_InnovRT003_noLowUMIcells_PCA_cellCyclePhase.pdf"), width = 12, height = 12)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = Phase),
+               size    = 1#,
+               #pch     = 21
+               ) +
+    #scale_fill_continuous(type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+
+# Cell clustering
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- FindNeighbors(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                          dims = 1:PCmin
+                                                          )
+
+clustering_resolutions <- seq(from = 0, to = 2, by = 0.1)
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- FindClusters(object     = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                         resolution = clustering_resolutions
+                                                         )      
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_InnovRT003_noLowUMIcells.rds"
+                        )
+        )
+    
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_InnovRT003_noLowUMIcells.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_InnovRT003_noLowUMIcells@meta.data,
+         prefix          = "RNA_snn_res.",
+         #node_colour     = "sc3_stability",
+         #layout          = "sugiyama",
+         use_core_edges  = TRUE,
+         color           = "red"
+         )
+#dev.off()
+
+head(scRNAseq_Seurat_InnovRT003_noLowUMIcells@meta.data)
+
+choosenResolution <- "RNA_snn_res.1"
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_InnovRT003_noLowUMIcells_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_InnovRT003_noLowUMIcells@meta.data
+       ) +
+    stat_count(mapping = aes(x     = eval(as.name(choosenResolution)),
+                             fill  = Phase
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = eval(as.name(choosenResolution)),
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              fontface     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+# Export meta data (for SCENIC analysis)
+head(scRNAseq_Seurat_InnovRT003_noLowUMIcells@meta.data)
+
+write.table(x      = scRNAseq_Seurat_InnovRT003_noLowUMIcells@meta.data,
+            file   = "scRNAseq_Seurat_InnovRT003_noLowUMIcells_metaData.txt",
+            sep    = ",",
+            quote  = FALSE
+            )
+
+```
+
+## UMAP visualization
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_InnovRT003_noLowUMIcells <- RunUMAP(object       = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                    dims         = 1:PCmin,
+                                                    n.neighbors  = 30
+                                                    )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_clust.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = choosenResolution,
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+# UMAP and nb of UMIs
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_clust_nbUMIs.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = "nFeature_RNA",
+            reduction = "umap",
+            pt.size = 3
+            ) +
+    ggtitle(label = "log10(nbUMIs)") +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_clust_nbGenes.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = "log10_nCount_RNA",
+            reduction = "umap",
+            pt.size = 3
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = "nCount_per_Feature",
+            reduction = "umap",
+            pt.size = 3
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_clust_percMito.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = "percent.mito",
+            reduction = "umap",
+            pt.size = 3
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of ribosomal proteine
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_clust_percRiboprot.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = "percent.riboProt",
+            reduction = "umap",
+            pt.size = 3
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and cell cycle phase
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_clust_cellCyclePhase.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        reduction   = "umap",
+        pt.size     = 2,
+        group.by    = "Phase",
+        label       = FALSE,
+        label.size  = 15
+        ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+
+## Boxplot of covariates per cluster
+
+```{r boxplot_and_covariates}
+
+# Boxplot and nb of UMIs
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_InnovRT003_noLowUMIcells_clust_nbUMIs.pdf"), width = 12, height = 12)
+boxplot_cluster_and_covariate(scRNAseq_Seurat_InnovRT003_noLowUMIcells, clustering = choosenResolution, covariate = "log10_nCount_RNA", ylab = "log10(UMI count)\n")
+#dev.off()
+
+# Boxplot and nb of genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_InnovRT003_noLowUMIcells_clust_nbGenes.pdf"), width = 12, height = 12)
+boxplot_cluster_and_covariate(scRNAseq_Seurat_InnovRT003_noLowUMIcells, clustering = choosenResolution, covariate = "nFeature_RNA", ylab = "nbGenes")
+#dev.off()
+
+# Boxplot and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_InnovRT003_noLowUMIcells_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+boxplot_cluster_and_covariate(scRNAseq_Seurat_InnovRT003_noLowUMIcells, clustering = choosenResolution, covariate = "nCount_per_Feature", ylab = "UMIs/gene")
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_InnovRT003_noLowUMIcells_clust_percMito.pdf"), width = 12, height = 12)
+boxplot_cluster_and_covariate(scRNAseq_Seurat_InnovRT003_noLowUMIcells, clustering = choosenResolution, covariate = "percent.mito", ylab = "% mito")
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_InnovRT003_noLowUMIcells_clust_percRiboProt.pdf"), width = 12, height = 12)
+boxplot_cluster_and_covariate(scRNAseq_Seurat_InnovRT003_noLowUMIcells, clustering = choosenResolution, covariate = "percent.riboProt", ylab = "% riboProt")
+#dev.off()
+
+```
+
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.25
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Set Idents to choosen resolution
+Idents(scRNAseq_Seurat_InnovRT003_noLowUMIcells) <- choosenResolution
+
+levels(Idents(scRNAseq_Seurat_InnovRT003_noLowUMIcells))
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_InnovRT003_noLowUMIcells.markers <- FindAllMarkers(object            = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+                                                                   min.pct           = min_pct,
+                                                                   logfc.threshold   = min_logfc,
+                                                                   min.diff.pct      = min_diffPct,
+                                                                   only.pos          = TRUE,
+                                                                   min.cells.feature = min_cellsFeature
+                                                                   )
+
+head(scRNAseq_Seurat_InnovRT003_noLowUMIcells.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_InnovRT003_noLowUMIcells_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_InnovRT003_noLowUMIcells.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10#,
+              #fontface = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_InnovRT003_noLowUMIcells.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_InnovRT003_noLowUMIcells.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_InnovRT003_noLowUMIcells_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+          features = scRNAseq_Seurat_InnovRT003_noLowUMIcells.markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_InnovRT003_noLowUMIcells_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+          features = nTop_markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=10))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_InnovRT003_noLowUMIcells_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 20
+scRNAseq_Seurat_InnovRT003_noLowUMIcells.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_InnovRT003_noLowUMIcells.markers,
+            file        = paste0(pathToReport,"scRNAseq_InnovRT003_noLowUMIcells_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = "SMARCB1",
+            pt.size  = 1,
+            cols = c("gray","yellow","brown1","brown4")
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.9),
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_InnovRT003_noLowUMIcells_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        features = "SMARCB1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+## ATRT SSH signature genes expression
+
+### Import signature genes
+
+```{r import_geneSet}
+
+# Import genSet
+geneSet <- read.table(file    = "/data/users/mandrian/rhabdoid_U830_projects/geneSet.csv",
+                      header  = TRUE,
+                      sep     = ";"
+                      )
+head(geneSet)
+
+# Gene markers per cell type
+group_by(.data = geneSet,
+         #,Cell.type
+         ,Group
+         ) %>%
+    summarise(number = n()) %>%
+    print(n=nrow(.), width = Inf)
+
+```
+
+### ATRT signature genes
+
+```{r ATRT_signature_genes}
+
+# Select ATRT genes
+geneSet_ATRT <- filter(.data    = geneSet,
+                       Interest == "ATRT"
+                       )
+geneSet_ATRT
+
+# Gene markers per cell type
+group_by(.data = geneSet_ATRT,
+         #,Cell.type
+        ,Group
+        ,source
+         ) %>%
+    summarise(number = n()) %>%
+    print(n=nrow(.), width = Inf)
+
+```
+
+#### ATRT signature from Torchia et al, 2016
+
+```{r SHH_markers_expression_Torchia2016}
+
+# Select ATRT  Torchia et al. genes
+geneSet_ATRT_Torchia2016 <- filter(.data  = geneSet_ATRT,
+                                   source == "Torchia et al., 2016"
+                                   )
+geneSet_ATRT_Torchia2016
+
+geneSet_ATRT_Torchia2016
+
+# Gene markers per cell type
+group_by(.data = geneSet_ATRT_Torchia2016,
+         #,Cell.type
+        ,Group
+        ,source
+         ) %>%
+    summarise(number = n()) %>%
+    print(n=nrow(.), width = Inf)
+
+```
+
+##### ATRT SHH signature from Torchia et al, 2016
+
+```{r SHH_markers_expression_Torchia2016}
+
+# Select SHH gene signatures
+geneSet_ATRT_Torchia2016_SHH <- filter(.data = geneSet_ATRT_Torchia2016,
+                                       Group == "SHH"
+                                       )
+geneSet_ATRT_Torchia2016_SHH$Gene
+
+# ATRT SHH signature gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Torchia2016_SHH_genes.pdf"), width = 12, height = 20)
+FeaturePlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = geneSet_ATRT_Torchia2016_SHH$Gene,
+            pt.size  = 0.5,
+            slot     = "data",
+            ncol     = 2,
+            cols     = c("gray","yellow","brown1","brown4")
+            )
+#dev.off()
+
+# ATRT SHH signature gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Torchia2016_SHH_genes.pdf"), width = 12, height = 20)
+VlnPlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        features = geneSet_ATRT_Torchia2016_SHH$Gene,
+        slot     = "data",
+        pt.size  = 0,
+        ncol     = 2
+        )
+#dev.off()
+
+```
+
+##### ATRT MYC signature from Torchia et al, 2016
+
+```{r SHH_markers_expression_Torchia2016}
+
+# Select MYC gene signatures
+geneSet_ATRT_Torchia2016_MYC <- filter(.data = geneSet_ATRT_Torchia2016,
+                                       Group == "MYC"
+                                       )
+geneSet_ATRT_Torchia2016_MYC$Gene
+
+# ATRT MYC signature gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Torchia2016_MYC_genes.pdf"), width = 12, height = 20)
+FeaturePlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = geneSet_ATRT_Torchia2016_MYC$Gene,
+            pt.size  = 0.5,
+            slot     = "data",
+            ncol     = 2,
+            cols     = c("gray","yellow","brown1","brown4")
+            )
+#dev.off()
+
+# ATRT MYC signature gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Torchia2016_MYC_genes.pdf"), width = 12, height = 20)
+VlnPlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        features = geneSet_ATRT_Torchia2016_MYC$Gene,
+        slot     = "data",
+        pt.size  = 0,
+        ncol     = 2
+        )
+#dev.off()
+
+```
+
+##### ATRT SHH specific TFs (Johann et al, 2016: Table S6)
+
+```{r SHH_markers_expression_Torchia2016}
+
+# Select SHH TFs
+geneSet_ATRT_Johann2016_SHH_TFs <- filter(.data = geneSet_ATRT,
+                                          source == "Johann et al., 2016",
+                                          Group == "SHH"
+                                          )
+geneSet_ATRT_Johann2016_SHH_TFs$Gene
+
+# ATRT SHH signature gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Johann2016_SHH_TFs.pdf"), width = 12, height = 20)
+FeaturePlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = geneSet_ATRT_Johann2016_SHH_TFs$Gene,
+            pt.size  = 0.5,
+            slot     = "data",
+            ncol     = 2,
+            cols     = c("gray","yellow","brown1","brown4")
+            )
+#dev.off()
+
+# ATRT SHH signature gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Johann2016_SHH_TFs.pdf"), width = 12, height = 20)
+VlnPlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        features = geneSet_ATRT_Johann2016_SHH_TFs$Gene,
+        slot     = "data",
+        pt.size  = 0,
+        ncol     = 2
+        )
+#dev.off()
+
+```
+
+##### ATRT MYC specific TFs (Johann et al, 2016: Table S6)
+
+```{r MYC_markers_expression_Torchia2016}
+
+# Select MYC TFs
+geneSet_ATRT_Johann2016_MYC_TFs <- filter(.data = geneSet_ATRT,
+                                          source == "Johann et al., 2016",
+                                          Group == "MYC"
+                                          )
+geneSet_ATRT_Johann2016_MYC_TFs$Gene
+
+# ATRT MYC signature gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Johann2016_MYC_TFs.pdf"), width = 12, height = 20)
+FeaturePlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = geneSet_ATRT_Johann2016_MYC_TFs$Gene,
+            pt.size  = 0.5,
+            slot     = "data",
+            ncol     = 1,
+            cols     = c("gray","yellow","brown1","brown4")
+            )
+#dev.off()
+
+# ATRT MYC signature gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Johann2016_MYC_TFs.pdf"), width = 12, height = 20)
+VlnPlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        features = geneSet_ATRT_Johann2016_MYC_TFs$Gene,
+        slot     = "data",
+        pt.size  = 0,
+        ncol     = 1
+        )
+#dev.off()
+
+```
+
+##### ATRT SHH markers found heterogeneously expressed in integrated INI254, INI255 and INI267 data 
+
+```{r heterATRTSHHmarkers}
+
+# ATRT SHH signature gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Torchia2016_Johann2016_SHH_genes_heteroExp.pdf"), width = 24, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+            features = c("ASCL1","STMN4","DLL3","TTYH1","FABP7","HES6","HES5","INSM1"),
+            pt.size  = 0.5,
+            slot     = "data",
+            ncol     = 4,
+            cols     = c("gray","yellow","brown1","brown4")
+            )
+#dev.off()
+
+# ATRT MYC signature gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_InnovRT003_noLowUMIcells_ATRT_Torchia2016_Johann2016_SHH_genes_heteroExp.pdf"), width = 24, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_InnovRT003_noLowUMIcells,
+        features = c("ASCL1","STMN4","DLL3","TTYH1","FABP7","HES6","HES5","INSM1"),
+        slot     = "data",
+        pt.size  = 0,
+        ncol     = 4
+        )
+#dev.off()
+
+```
+
+# Cerebro analysis (for visualization)
+
+## Copy seurat object
+
+```{r copy_seurat_object}
+
+stopifnot(require(cerebroApp))
+
+scRNAseq_Seurat_InnovRT003_noLowUMIcells
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro <- scRNAseq_Seurat_InnovRT003_noLowUMIcells
+head(scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro@meta.data)
+
+```
+
+## Clusters relationship trees
+
+```{r clusters_relationship}
+
+# Create vectors of clustering resolutions
+groups <- paste0('RNA_snn_res.',seq(0,2,0.1))
+groups
+
+# Build phylogenetic tree of clusters
+for (res in groups[-1])
+{
+    print(res)
+    Idents(scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro) <- res
+    scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro <- BuildClusterTree(object           = scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro,
+                                                dims             = 1:PCmin,
+                                                reorder          = FALSE,
+                                                reorder.numeric  = FALSE
+                                                )
+    scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro@misc$trees[[res]] <- scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro@tools$BuildClusterTree
+}
+
+```
+
+## Compute percentage of mitochondrial and ribosomal transcripts
+
+```{r cerebro_mito_ribo}
+
+# % of mito and ribo 
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro <- addPercentMtRibo(object             = scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro,
+                                                       organism           = 'hg',
+                                                       gene_nomenclature  = 'name'
+                                                       )
+
+```
+
+## Get most expressed genes
+
+```{r cerebro_most_expressed_genes}
+
+# Most expressed genes
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro <- getMostExpressedGenes(object  = scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro,
+                                                            assay   = 'RNA',
+                                                            groups  = groups
+                                                            )
+
+```
+
+## Get marker genes
+
+```{r cerebro_marker_genes}
+
+# Mark genes
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro <- getMarkerGenes(object    = scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro,
+                                                     assay     = 'RNA',
+                                                     organism  = 'hg',
+                                                     groups    = groups,
+                                                     name      = 'scRNAseq_InnovRT003_noLowUMIcells',
+                                                     only_pos  = TRUE
+                                                     )
+
+```
+
+## Perform pathway enrichment on marker genes
+
+```{r cerebro_pathway_enrichment_on_markers}
+
+# Pathway analysis
+scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro <- getEnrichedPathways(object              = scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro,
+                                                          marker_genes_input  = 'scRNAseq_InnovRT003_noLowUMIcells',
+                                                          adj_p_cutoff        = 0.01,
+                                                          max_terms           = 100
+                                                          )
+
+```
+
+## Gene set enrichment
+
+```{r cerebro_gene_set_enrichment}
+
+# Pathway analysis
+#scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro <- performGeneSetEnrichmentAnalysis(object    = scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro,
+ #                                                           assay     = "RNA",
+  #                                                          GMT_file  = "xx/xx/msigdb.v5.2.symbols_mouse.gmt",
+   #                                                         groups    = groups
+    #                                                        )
+
+```
+
+
+## Export to cerebro format
+
+```{r export_to_cerebro_format}
+
+colnames(scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro@meta.data)
+
+# Export to cerebro format
+exportFromSeurat(object             = scRNAseq_Seurat_InnovRT003_noLowUMIcells_cerebro,
+                 assay              = 'RNA',
+                 slot               = 'data',
+                 file               = paste0(pathToReport,'scRNAseq_Seurat_InnovRT003_noLowUMIcells.crb'),
+                 experiment_name    = 'scRNAseq_InnovRT003_noLowUMIcells',
+                 organism           = 'mm',
+                 groups             = groups,
+                 nUMI               = 'nCount_RNA',
+                 nGene              = 'nFeature_RNA',
+                 add_all_meta_data  = TRUE,
+                 verbose            = FALSE
+                 )
+
+# Copy to zerkalo
+copyToZerkalo(file = paste0(pathToReport,'scRNAseq_Seurat_InnovRT003_noLowUMIcells.crb'),
+              zerkaloDir = 'mandrian_cellOrigin_ATRT'
+              )
+
+```
+
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

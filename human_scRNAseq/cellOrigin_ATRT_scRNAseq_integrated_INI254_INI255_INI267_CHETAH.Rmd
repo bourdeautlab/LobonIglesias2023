@@ -1,0 +1,796 @@
+---
+title: "scRNAseq ATRT-SHH (Cerebellar Ant. Lobe) - CHETAH analysis"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "cellOrigin_ATRT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+pathToInfo                   <- paste0(pathToThisProject,"svn/analyse/info/")
+pathToRNApip_RESULT          <- paste0(pathToThisProject,"RNApip_RESULT/")
+pathToFeatureCounts          <- paste0(pathToThisProject,"FeatureCounts_RESULT/")
+
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("cellOrigin_ATRT_scRNAseq_integrated_INI254_INI255_INI267.RData")
+
+#save.image(file="cellOrigin_ATRT_scRNAseq_integrated_INI254_INI255_INI267.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+
+```
+
+```{r delete_all_objects}
+
+# List objects ordered by their size
+source("/data/users/mandrian/programmes/lsos.R")
+lsos()
+
+# Delete all objects
+#rm(list = ls())
+
+```
+
+## CHETAH
+
+### Prepare reference data
+
+#### Prepare all developmental mousebrain single cell reference
+
+```{r reference_data}
+
+lsos()
+
+# Load reference data from CHETAH
+#load(file = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/CHETAH_TME_reference.Rdata")
+#reference
+#head(colData(reference))
+
+# Import mouse brain meta data
+mousebrain_dev_all_metadata <- read_tsv(file = "metadata_dev_all_df.csv")
+head(mousebrain_dev_all_metadata)
+
+colnames(mousebrain_dev_all_metadata)
+
+dim(mousebrain_dev_all_metadata)
+
+# Reference class levels
+levels(factor(mousebrain_dev_all_metadata$Class))
+levels(factor(mousebrain_dev_all_metadata$Tissue))
+levels(factor(mousebrain_dev_all_metadata$Age))
+
+# Summarize metadata according to Class (cell type)
+mousebrain_dev_all_metadata %>%
+    group_by(Class) %>%
+summarize(number = n()
+          ) %>%
+    print(n = nrow(.), width = Inf) %>%
+    ggplot(mapping = aes(x = reorder(Class,number),
+                         y = number
+                         )
+           ) +
+    xlab("Cell Type") +
+    ylab("# cells") +
+geom_bar(stat = "identity",
+         color = "blue",
+         fill = "blue"
+         ) +
+    geom_text(mapping = aes(label = paste0(number," cells")),
+                            size = 5,
+                            hjust = -0.1
+                            ) +
+    coord_flip() +
+    theme_bw() +
+    theme(text = element_text(size = 20)
+          ) -> p
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_mousbrain_dev_all_class.pdf"), width = 20, height =10) 
+p
+#dev.off()
+
+# Summarize metadata according to Class and Tissue
+mousebrain_dev_all_metadata %>%
+    group_by(Class, Tissue) %>%
+summarize(number = n()
+          ) %>%
+    print(n = nrow(.), width = Inf) %>%
+    ggplot(mapping = aes(x = reorder(Class,number),
+                         y = number
+                         )
+           ) +
+    xlab("Cell Type") +
+    ylab("# cells") +
+geom_bar(mapping = aes(fill = Tissue),
+         stat = "identity"
+         ) +
+    coord_flip() +
+    theme_bw() +
+    theme(text = element_text(size = 20)
+          ) -> p
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_mousbrain_dev_all_class_tissue.pdf"), width = 20, height =10) 
+p
+#dev.off()
+
+# Summarize metadata according to Class and Age
+mousebrain_dev_all_metadata %>%
+    group_by(Class, Age) %>%
+summarize(number = n()
+          ) %>%
+    print(n = nrow(.), width = Inf) %>%
+    ggplot(mapping = aes(x = reorder(Class,number),
+                         y = number
+                         )
+           ) +
+    xlab("Cell Type") +
+    ylab("# cells") +
+geom_bar(mapping = aes(fill = Age),
+         stat = "identity"
+         ) +
+    coord_flip() +
+    theme_bw() +
+    theme(text = element_text(size = 20)
+          ) -> p
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_mousbrain_dev_all_class_age.pdf"), width = 20, height =10) 
+p
+#dev.off()
+
+# Randomly select n cells per class 
+N = 100
+mousebrain_dev_all_metadata_sampleN <- mousebrain_dev_all_metadata %>%
+    group_by(Class) %>%
+    dplyr::sample_n(N)
+
+summarize(.data = mousebrain_dev_all_metadata_sampleN,
+          number = n()
+          ) %>%
+    print(n = nrow(.), width = Inf)
+
+# Save metadata for mouse  (murine_RT scRNAseq) CHETAH analysis
+saveRDS(object = mousebrain_dev_all_metadata_sampleN, file = "mousebrain_dev_all_metadata_sampleN.RDS")
+
+# Import mouse brain count table
+mousebrain_dev_all <- read_tsv(file = "dev_all_df.csv")
+head(mousebrain_dev_all)
+
+# Save object into RDS file then delete it (too large)
+#saveRDS(object = mousebrain_dev_all, file = "mousebrain_dev_all.RDS")
+#mousebrain_dev_all <- readRDS(file = "mousebrain_dev_all.RDS")
+#rm(mousebrain_dev_all)
+
+# Subset count table
+mousebrain_dev_all_metadata_sampleN <- ungroup(mousebrain_dev_all_metadata_sampleN)
+mousebrain_dev_all_sampleN <- filter(.data = mousebrain_dev_all,
+                                     CellID %in% as.vector(mousebrain_dev_all_metadata_sampleN$CellID)
+                                     )
+dim(mousebrain_dev_all_sampleN)
+head(mousebrain_dev_all_sampleN)
+
+# Convert CellID column to rownames
+mousebrain_dev_all_sampleN <- data.frame(mousebrain_dev_all_sampleN)
+rownames(mousebrain_dev_all_sampleN) <- mousebrain_dev_all_sampleN$CellID
+mousebrain_dev_all_sampleN$CellID <- NULL
+head(mousebrain_dev_all_sampleN[,1:5])
+
+# Convert count table into matrix
+mousebrain_dev_all_sampleN_matrix <- as.matrix(mousebrain_dev_all_sampleN)
+head(mousebrain_dev_all_sampleN_matrix[,1:5])
+
+# Transpose matrix
+mousebrain_dev_all_sampleN_matrix_T <- t(mousebrain_dev_all_sampleN_matrix)
+head(mousebrain_dev_all_sampleN_matrix_T[,1:5])
+dim(mousebrain_dev_all_sampleN_matrix_T)
+
+# Save matrix for mouse  (murine_RT scRNAseq) CHETAH analysis
+saveRDS(object = mousebrain_dev_all_sampleN_matrix_T, file = "mousebrain_dev_all_sampleN_matrix_T.RDS")
+
+# Convert mouse gene name into human gene name
+head(symbols_conversion)
+
+mousebrain_dev_all_sampleN_matrix_T_plus <- merge(x     = mousebrain_dev_all_sampleN_matrix_T,
+                                                  y     = symbols_conversion,
+                                                  by.x  = 0,
+                                                  by.y  = "MGI.symbol",
+                                                  all   = FALSE
+                                                  )
+
+dim(mousebrain_dev_all_sampleN_matrix_T_plus)
+
+# Remove duplicated genes
+mousebrain_dev_all_sampleN_matrix_T_plus <- mousebrain_dev_all_sampleN_matrix_T_plus[!duplicated(mousebrain_dev_all_sampleN_matrix_T_plus$HGNC.symbol),]
+
+dim(mousebrain_dev_all_sampleN_matrix_T_plus)
+
+nc <- ncol(mousebrain_dev_all_sampleN_matrix_T_plus)
+head(mousebrain_dev_all_sampleN_matrix_T_plus[,(nc-6):nc])
+
+rownames(mousebrain_dev_all_sampleN_matrix_T_plus) <- mousebrain_dev_all_sampleN_matrix_T_plus$HGNC.symbol
+mousebrain_dev_all_sampleN_matrix_T_plus$HGNC.symbol <- NULL
+mousebrain_dev_all_sampleN_matrix_T_plus$Row.names <- NULL
+head(mousebrain_dev_all_sampleN_matrix_T_plus[,1:5])
+
+# Create sce object for mousebrain data
+mousebrain_dev_all.sce <- SingleCellExperiment(assays = list(counts = mousebrain_dev_all_sampleN_matrix_T_plus),
+                                               colData = data.frame(mousebrain_dev_all_metadata_sampleN)
+                                               )
+
+mousebrain_dev_all.sce
+
+
+```
+
+icicicicicicicicicici
+
+#### Prepare all developmental mousebrain profile reference
+
+```{r reference_data}
+
+# Import mouse brain meta data
+mousebrain_dev_all_agg_metadata <- read_tsv(file = "metadata_dev_all_agg_df.csv")
+head(mousebrain_dev_all_agg_metadata)
+colnames(mousebrain_dev_all_agg_metadata)
+dim(mousebrain_dev_all_agg_metadata)
+
+# Reference class levels
+levels(factor(mousebrain_dev_all_agg_metadata$Class))
+levels(factor(mousebrain_dev_all_agg_metadata$Tissue_All))
+levels(factor(mousebrain_dev_all_agg_metadata$ClusterName))
+
+# Summarize metadata according to Class (cell type)
+mousebrain_dev_all_agg_metadata %>%
+    group_by(Class) %>%
+summarize(number = n()
+          ) %>%
+    print(n = nrow(.), width = Inf) %>%
+    ggplot(mapping = aes(x = reorder(Class,number),
+                         y = number
+                         )
+           ) +
+    xlab("Cell type") +
+    ylab("# clusters") +
+geom_bar(stat = "identity",
+         color = "blue",
+         fill = "blue"
+         ) +
+    geom_text(mapping = aes(label = paste0(number," clusters")),
+                            size = 5,
+                            hjust = -0.1
+                            ) +
+    coord_flip() +
+    theme_bw() +
+    theme(text = element_text(size = 20)
+          ) -> p
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_mousbrain_dev_all_agg_class.pdf"), width = 20, height =10) 
+p
+#dev.off()
+
+
+
+
+
+# Import mouse brain profile table
+mousebrain_dev_all_agg <- read_tsv(file = "dev_all_agg_df.csv")
+head(mousebrain_dev_all_agg)
+
+dim(mousebrain_dev_all_agg)
+
+# Merge count table and metadata
+
+head(mousebrain_dev_all_agg_metadata)
+
+dim(mousebrain_dev_all_agg_metadata)
+
+all(mousebrain_dev_all_agg_metadata$X1 == mousebrain_dev_all_agg$X1)
+
+mousebrain_dev_all_agg_metadata_minus <- dplyr::select(.data = mousebrain_dev_all_agg_metadata,
+                                                       X1,
+                                                       Class
+                                                       )
+
+mousebrain_dev_all_agg_metadata_minus
+
+mousebrain_dev_all_agg_plus <- merge(x = mousebrain_dev_all_agg_metadata_minus,
+                                     y = mousebrain_dev_all_agg,
+                                     by = "X1"
+                                     )
+mousebrain_dev_all_agg_plus$X1 <- NULL
+
+head(mousebrain_dev_all_agg_plus[,1:3])
+
+mousebrain_dev_all_agg_plus %>%
+    group_by(Class) %>%
+    summarize_all(.tbl = mousebrain_dev_all_agg_plus,
+                  .funs = mean
+                  )
+
+# Subset count table
+mousebrain_dev_all_metadata_sampleN <- ungroup(mousebrain_dev_all_metadata_sampleN)
+mousebrain_dev_all_sampleN <- filter(.data = mousebrain_dev_all,
+                                     CellID %in% as.vector(mousebrain_dev_all_metadata_sampleN$CellID)
+                                     )
+dim(mousebrain_dev_all_sampleN)
+head(mousebrain_dev_all_sampleN)
+
+# Convert CellID column to rownames
+mousebrain_dev_all_sampleN <- data.frame(mousebrain_dev_all_sampleN)
+rownames(mousebrain_dev_all_sampleN) <- mousebrain_dev_all_sampleN$CellID
+mousebrain_dev_all_sampleN$CellID <- NULL
+head(mousebrain_dev_all_sampleN[,1:5])
+
+# Convert count table into matrix
+mousebrain_dev_all_sampleN_matrix <- as.matrix(mousebrain_dev_all_sampleN)
+head(mousebrain_dev_all_sampleN_matrix[,1:5])
+
+# Transpose matrix
+mousebrain_dev_all_sampleN_matrix_T <- t(mousebrain_dev_all_sampleN_matrix)
+head(mousebrain_dev_all_sampleN_matrix_T[,1:5])
+dim(mousebrain_dev_all_sampleN_matrix_T)
+
+# Convert mouse gene name into human gene name
+head(symbols_conversion)
+
+mousebrain_dev_all_sampleN_matrix_T_plus <- merge(x     = mousebrain_dev_all_sampleN_matrix_T,
+                                                  y     = symbols_conversion,
+                                                  by.x  = 0,
+                                                  by.y  = "MGI.symbol",
+                                                  all   = FALSE
+                                                  )
+
+dim(mousebrain_dev_all_sampleN_matrix_T_plus)
+
+# Remove duplicated genes
+mousebrain_dev_all_sampleN_matrix_T_plus <- mousebrain_dev_all_sampleN_matrix_T_plus[!duplicated(mousebrain_dev_all_sampleN_matrix_T_plus$HGNC.symbol),]
+
+dim(mousebrain_dev_all_sampleN_matrix_T_plus)
+
+nc <- ncol(mousebrain_dev_all_sampleN_matrix_T_plus)
+head(mousebrain_dev_all_sampleN_matrix_T_plus[,(nc-6):nc])
+
+rownames(mousebrain_dev_all_sampleN_matrix_T_plus) <- mousebrain_dev_all_sampleN_matrix_T_plus$HGNC.symbol
+mousebrain_dev_all_sampleN_matrix_T_plus$HGNC.symbol <- NULL
+mousebrain_dev_all_sampleN_matrix_T_plus$Row.names <- NULL
+head(mousebrain_dev_all_sampleN_matrix_T_plus[,1:5])
+
+# Create sce object for mousebrain data
+mousebrain_dev_all.sce <- SingleCellExperiment(assays = list(counts = mousebrain_dev_all_sampleN_matrix_T_plus),
+                                               colData = data.frame(mousebrain_dev_all_metadata_sampleN)
+                                               )
+
+mousebrain_dev_all.sce
+
+
+```
+
+
+
+### CHETAH with all clusters
+
+#### Prepare input data
+
+```{r input_data}
+
+# Extract cell matrix 
+chetah_input_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_integrated,
+                                              slot = "data"
+                                              )
+                                 )
+head(chetah_input_matrix[,1:3])
+
+# Save object into RDS file then delete it (too large)
+#saveRDS(object = chetah_input_matrix, file = "chetah_input_matrix.RDS")
+#rm(chetah_input_matrix)
+
+
+# Extract UMAP coordinates 
+chetah_input_umap <- scRNAseq_Seurat_integrated@reductions$umap@cell.embeddings
+head(chetah_input_umap)
+
+# Create singleCellExperiment object
+chetah_input_se <- SingleCellExperiment(assays = list(counts = chetah_input_matrix),
+                                        reducedDims = SimpleList(umap = chetah_input_umap)
+                                        )
+
+# Save object into RDS file then delete it (too large)
+#saveRDS(object = chetah_input_se, file = "chetah_input_se.RDS")
+#rm(chetah_input_se)
+
+
+```
+
+#### Running CHETAH
+
+```{r running_chetah}
+
+# Run CHETAH using class
+chetah_scRNAseq_integrated_vs_mousebrainDev_res <- CHETAHclassifier(input      = chetah_input_se,
+                                                                    ref_cells  = mousebrain_dev_all.sce,
+                                                                    ref_ct     = "Class"
+                                                                    )
+
+# Save mousebrain_dev_all object to RDS file then delete it (too large)
+saveRDS(object = chetah_scRNAseq_integrated_vs_mousebrainDev_res,
+        file = "chetah_scRNAseq_integrated_vs_mousebrainDev_res.RDS"
+        )
+
+# Remove object
+#rm(chetah_scRNAseq_integrated_vs_mousebrainDev_res)
+
+# Recover RDS object
+#chetah_scRNAseq_integrated_vs_mousebrainDev_res <- readRDS("chetah_scRNAseq_integrated_vs_mousebrainDev_res.RDS")
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_class.pdf"), width = 20, height =10) 
+PlotCHETAH(input = chetah_scRNAseq_integrated_vs_mousebrainDev_res)
+#dev.off()
+
+# Run CHETAH using Tissue
+chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue <- CHETAHclassifier(input     = chetah_input_se,
+                                                                           ref_cells = mousebrain_dev_all.sce,
+                                                                           ref_ct = "Tissue"
+                                                                           )
+
+# Save mousebrain_dev_all object to RDS file then delete it (too large)
+saveRDS(object = chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue,
+        file = "chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue.RDS"
+        )
+
+# Recover RDS object
+#chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue <- readRDS("chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue.RDS")
+
+# Remove object
+rm(chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue)
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_tissue.pdf"), width = 20, height =10) 
+PlotCHETAH(input = chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue)
+#dev.off()
+
+# Run CHETAH using Age
+chetah_scRNAseq_integrated_vs_mousebrainDev_res_age <- CHETAHclassifier(input     = chetah_input_se,
+                                                                        ref_cells = mousebrain_dev_all.sce,
+                                                                        ref_ct    = "Age"
+                                                                        )
+
+# Save mousebrain_dev_all object to RDS file then delete it (too large)
+saveRDS(object = chetah_scRNAseq_integrated_vs_mousebrainDev_res_age,
+        file = "chetah_scRNAseq_integrated_vs_mousebrainDev_res_age.RDS"
+        )
+
+# Recover RDS object
+#chetah_scRNAseq_integrated_vs_mousebrainDev_res_age <- readRDS("chetah_scRNAseq_integrated_vs_mousebrainDev_res_age.RDS")
+
+# Remove object
+rm(chetah_scRNAseq_integrated_vs_mousebrainDev_res_age)
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_age.pdf"), width = 20, height =10) 
+PlotCHETAH(input = chetah_scRNAseq_integrated_vs_mousebrainDev_res_age)
+#dev.off()
+
+# Extract gene classifiers
+str(chetah_scRNAseq_integrated_vs_mousebrainDev_res, max.level=4)
+
+str(chetah_scRNAseq_integrated_vs_mousebrainDev_res@int_metadata$CHETAH$genes)
+
+```
+
+
+```{r plot_separately}
+
+# Extract cell type
+chetah_scRNAseq_integrated_vs_mousebrainDev_res_table <- data.frame(chetah_scRNAseq_integrated_vs_mousebrainDev_res@colData@listData$celltype_CHETAH)
+colnames(chetah_scRNAseq_integrated_vs_mousebrainDev_res_table) <- "cellType"
+
+
+# Extract tissue
+chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue_table <- data.frame(chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue@colData@listData$celltype_CHETAH)
+colnames(chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue_table) <- "tissue"
+
+# Extract age
+chetah_scRNAseq_integrated_vs_mousebrainDev_res_age_table <- data.frame(chetah_scRNAseq_integrated_vs_mousebrainDev_res_age@colData@listData$celltype_CHETAH)
+colnames(chetah_scRNAseq_integrated_vs_mousebrainDev_res_age_table) <- "age"
+
+
+all(rownames(chetah_scRNAseq_integrated_vs_mousebrainDev_res_table) == rownames(chetah_input_umap))
+all(rownames(chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue_table) == rownames(chetah_input_umap))
+all(rownames(chetah_scRNAseq_integrated_vs_mousebrainDev_res_age_table) == rownames(chetah_input_umap))
+
+chetah_scRNAseq_integrated_vs_mousebrainDev_res_table_plus <- cbind(chetah_scRNAseq_integrated_vs_mousebrainDev_res_table,
+                                                                        chetah_scRNAseq_integrated_vs_mousebrainDev_res_tissue_table,
+                                                                        chetah_scRNAseq_integrated_vs_mousebrainDev_res_age_table,
+                                                                        chetah_input_umap
+                                                                        )
+                                                                        
+head(chetah_scRNAseq_integrated_vs_mousebrainDev_res_table_plus)
+
+levels(factor(chetah_scRNAseq_integrated_vs_mousebrainDev_res_table_plus$tissue))
+
+levels(factor(chetah_scRNAseq_integrated_vs_mousebrainDev_res_table_plus$cellType))
+
+# Plot UMAP by cell types
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_cellType_sepatated.pdf"), width = 20, height =10) 
+ggplot(data = mutate(.data = chetah_scRNAseq_integrated_vs_mousebrainDev_res_table_plus,
+                     cellType = factor(cellType,
+                                  levels = c("Glioblast","Mesenchyme","Neural tube","Neuron","Oligodendrocyte","Pineal gland","Radial glia","Schwann cell","Subcommissural organ","Vascular","Immune")
+                                  )
+                     ) %>% filter(!is.na(cellType)),
+       mapping = aes(x = UMAP_1,
+                     y = UMAP_2
+                     )
+       ) +
+    geom_point(color = "darkgreen",
+               size = 0.5
+               ) +
+    facet_wrap(~cellType, nrow = 3) +
+    theme_bw() +
+    theme(strip.background = element_rect(fill = "white",color = "white"),
+          strip.text = element_text(face = "bold", size = 20)
+          )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_cellType_sepatated_nodes.pdf"), width = 20, height =10) 
+ggplot(data = mutate(.data = chetah_scRNAseq_integrated_vs_mousebrainDev_res_table_plus,
+                     cellType = factor(cellType,
+                                  levels = c("Node1","Node2","Node3","Node4","Node5","Node6","Node7","Node8","Node11","Node14","Node15","Node16","Node17","Node18","Node20","Node21","Node22","Unassigned")
+                                  )
+                     ) %>% filter(!is.na(cellType)),
+       mapping = aes(x = UMAP_1,
+                     y = UMAP_2
+                     )
+       ) +
+    geom_point(color = "darkgreen",
+               size = 0.5
+               ) +
+    facet_wrap(~cellType, nrow = 3) +
+    theme_bw() +
+    theme(strip.background = element_rect(fill = "white",color = "white"),
+          strip.text = element_text(face = "bold", size = 20)
+          )
+#dev.off()
+
+
+
+# Plot UMAP by tissue
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_tissue_sepatated.pdf"), width = 20, height =10) 
+ggplot(data = mutate(.data = chetah_scRNAseq_integrated_vs_mousebrainDev_res_table_plus,
+                     tissue = factor(tissue,
+                                  levels = c("Forebrain","ForebrainDorsal","ForebrainVentral","ForebrainVentroLateral","ForebrainVentroThalamic","Head","Hindbrain","MidbrainDorsal","MidbrainVentral","All (No extraembryonal)")
+                                  )
+                     ) %>% filter(!is.na(tissue)),
+       mapping = aes(x = UMAP_1,
+                     y = UMAP_2
+                     )
+       ) +
+    geom_point(color = "darkgreen",
+               size = 0.5
+               ) +
+    facet_wrap(~tissue, nrow = 3) +
+    theme_bw() +
+    theme(strip.background = element_rect(fill = "white",color = "white"),
+          strip.text = element_text(face = "bold", size = 20)
+          )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_tissue_sepatated_nodes.pdf"), width = 20, height =10) 
+ggplot(data = mutate(.data = chetah_scRNAseq_integrated_vs_mousebrainDev_res_table_plus,
+                     tissue = factor(tissue,
+                                  levels = c("Node1","Node2","Node3","Node4","Node5","Node6","Node7","Node8","Node9","Unassigned")
+                                  )
+                     ) %>% filter(!is.na(tissue)),
+       mapping = aes(x = UMAP_1,
+                     y = UMAP_2
+                     )
+       ) +
+    geom_point(color = "darkgreen",
+               size = 0.5
+               ) +
+    facet_wrap(~tissue, nrow = 3) +
+    theme_bw() +
+    theme(strip.background = element_rect(fill = "white",color = "white"),
+          strip.text = element_text(face = "bold", size = 20)
+          )
+#dev.off()
+
+
+# Plot UMAP by age
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_age_sepatated.pdf"), width = 20, height =10)
+ggplot(data = mutate(.data = chetah_scRNAseq_integrated_vs_mousebrainDev_res_age_table_plus,
+                     age = factor(age,
+                                  levels = c("e7.0","e8.0","e11.0","e12.0","e13.0","e13.5","e14.0","e14.5","e15.0","e16.25","e16.5","e17.0","e17.5","e18.0")
+                                  )
+                     ) %>% filter(!is.na(age)),
+       mapping = aes(x = UMAP_1,
+                     y = UMAP_2
+                     )
+       ) +
+    geom_point(color = "darkgreen",
+               size = 0.5
+               ) +
+    facet_wrap(~age, nrow = 3) +
+    theme_bw() +
+    theme(strip.background = element_rect(fill = "white",color = "white"),
+          strip.text = element_text(face = "bold", size = 20)
+          )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_vs_mousbrainDev_age_sepatated_nodes.pdf"), width = 20, height =10) 
+ggplot(data = mutate(.data = chetah_scRNAseq_integrated_vs_mousebrainDev_res_age_table_plus,
+                     age = factor(age,
+                                  levels = c("Node1","Node2","Node3","Node4","Node5","Node6","Node7","Node8","Node9","Node10","Node11","Node12","Node13","Node14","Node15","Node16","Node17","Unassigned")
+                                  )
+                     ) %>% filter(!is.na(age)),
+       mapping = aes(x = UMAP_1,
+                     y = UMAP_2
+                     )
+       ) +
+    geom_point(color = "darkgreen",
+               size = 0.5
+               ) +
+    facet_wrap(~age, nrow = 4) +
+    theme_bw() +
+    theme(strip.background = element_rect(fill = "white",color = "white"),
+          strip.text = element_text(face = "bold", size = 20)
+          )
+#dev.off()
+
+```
+
+### CHETAH with cluster 0, 1, 3 and 5
+
+#### Prepare input data
+
+```{r input_data}
+
+# Cluster 0,1,3,5 count data
+head(scRNAseq_Seurat_integrated_cellAnnot_0135_allGenes_matrix[,1:5])
+dim(scRNAseq_Seurat_integrated_cellAnnot_0135_allGenes_matrix)
+
+# Cluster 0,1,3,5 UMAP coordinates as computed by Monocle3
+head(scRNAseq_Seurat_integrated_cellAnnot_0135_monocle3_UMAP_metaData)
+scRNAseq_Seurat_integrated_cellAnnot_0135_monocle3_UMAP <- as.matrix(scRNAseq_Seurat_integrated_cellAnnot_0135_monocle3_UMAP_metaData[,1:2])
+colnames(scRNAseq_Seurat_integrated_cellAnnot_0135_monocle3_UMAP) <- c("UMAP_1","UMAP_2")
+head(scRNAseq_Seurat_integrated_cellAnnot_0135_monocle3_UMAP)
+
+# Create singleCellExperiment object
+chetah_input_se_clust0135 <- SingleCellExperiment(assays = list(counts = scRNAseq_Seurat_integrated_cellAnnot_0135_allGenes_matrix),
+                                                  reducedDims = SimpleList(umap = scRNAseq_Seurat_integrated_cellAnnot_0135_monocle3_UMAP)
+                                                  )
+
+# Save object into RDS file then delete it (too large)
+#saveRDS(object = chetah_input_se_clust0135, file = "chetah_input_se_clust0135.RDS")
+#rm(chetah_input_se_clust0135)
+
+```
+
+
+#### Running CHETAH
+
+```{r running_chetah}
+
+# Run CHETAH using class
+chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res <- CHETAHclassifier(input     = chetah_input_se_clust0135,
+                                                                              ref_cells = mousebrain_dev_all.sce,
+                                                                              ref_ct = "Class"
+                                                                              )
+
+# Save object to RDS file then delete it (too large)
+saveRDS(object = chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res,
+        file = "chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res.RDS"
+        )
+
+# Recover RDS object
+#chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res <- readRDS("chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res.RDS")
+# Remove object
+#rm(chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res)
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_clust0135_vs_mousbrainDev_class.pdf"), width = 20, height =10) 
+PlotCHETAH(input = chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res)
+#dev.off()
+
+# Run CHETAH using Tissue
+chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_tissue <- CHETAHclassifier(input     = chetah_input_se_clust0135,
+                                                                                     ref_cells = mousebrain_dev_all.sce,
+                                                                                     ref_ct = "Tissue"
+                                                                                     )
+
+# Save object to RDS file then delete it (too large)
+saveRDS(object = chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_tissue,
+        file = "chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_tissue.RDS"
+        )
+
+# Recover RDS object
+#chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_tissue <- readRDS("chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_tissue.RDS")
+
+# Remove object
+rm(chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_tissue)
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_clust0135_vs_mousbrainDev_tissue.pdf"), width = 20, height =10) 
+PlotCHETAH(input = chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_tissue)
+#dev.off()
+
+# Run CHETAH using Age
+chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_age <- CHETAHclassifier(input     = chetah_input_se_clust0135,
+                                                                                  ref_cells = mousebrain_dev_all.sce,
+                                                                                  ref_ct = "Age"
+                                                                                  )
+
+# Save object to RDS file then delete it (too large)
+saveRDS(object = chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_age,
+        file = "chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_age.RDS"
+        )
+
+# Recover RDS object
+#chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_age <- readRDS("chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_age.RDS")
+
+# Remove object
+rm(chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_age)
+
+#pdf(file = paste0(pathToFigures,"plotCHETAH_scRNAseq_integrated_clust0135_vs_mousbrainDev_age.pdf"), width = 20, height =10)
+PlotCHETAH(input = chetah_scRNAseq_integrated_clust0135_vs_mousebrainDev_res_age)
+#dev.off()
+
+```
+
+# session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

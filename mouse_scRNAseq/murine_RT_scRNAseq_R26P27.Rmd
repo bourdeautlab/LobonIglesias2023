@@ -1,0 +1,2889 @@
+---
+title: "Murine RT scRNAseq Rosa26-P27"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "murine_RT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+#pathToRNApip_RESULT          <- paste0(pathToThisProject,"RNApip_RESULT/")
+#pathToFeatureCounts          <- paste0(pathToThisProject,"FeatureCounts_RESULT/")
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("murine_RT_scRNAseq_R26P27.RData")
+
+#save.image(file="murine_RT_scRNAseq_R26P27.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("../plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+
+```
+
+```{r delete_all_objects}
+
+# Delete all objects
+#rm(list = ls())
+
+```
+
+# R26P27 scRNA-seq
+
+## Load data and create Seurat object
+
+```{r load_data}
+
+pathTo_R26P27_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/data/count_Rosa26-P27/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+R26P27_data <- Read10X(data.dir         = pathTo_R26P27_cellRangerCount,
+                       gene.column      = 2,
+                       unique.features  = TRUE
+                       )
+
+```
+
+## Create Seurat object
+
+```{r load_data}
+
+# Create Seurat object
+scRNAseq_Seurat_R26P27 <- CreateSeuratObject(counts   = R26P27_data,
+                                             project  = "R26P27"
+                                             )
+
+# Save Seurat object as RDS file
+saveRDS(object = scRNAseq_Seurat_R26P27,
+        file = paste0(pathToReport,"scRNAseq_Seurat_R26P27_raw.RDS")
+        )
+
+# Copy file to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"scRNAseq_Seurat_R26P27_raw.RDS"),
+              zerkaloDir = "mandrian_human_RT_scRNAseq"
+              )
+
+# Export raw meta.data
+write.table(x = scRNAseq_Seurat_R26P27@meta.data,
+            file = "scRNAseq_Seurat_R26P27_metadata.txt",
+            quote = FALSE,
+            sep = ','
+            )
+
+```
+
+## Cell QC and filtering
+
+```{r create_table_of_nbOfCell_after_filtering}
+
+# Create data frame
+cellFiltering <- data.frame(filtering = "no filtering",
+                            nbOfCells = nrow(scRNAseq_Seurat_R26P27@meta.data)
+                            )
+
+cellFiltering
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P27_cellFiltering.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering,
+       mapping = aes(x = filtering,
+                     y = nbOfCells
+                     ),
+             ) +
+    geom_bar(stat = "identity",
+             fill = "black"
+             ) +
+    ylim(0,10000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Compute percent of reads map on mitochondrial and ribosomal proteins
+
+```{r mito_ribo_reads_fraction}
+
+# Ribosomal protein reads fraction
+scRNAseq_Seurat_R26P27[["percent.riboProt"]] <- PercentageFeatureSet(object  = scRNAseq_Seurat_R26P27,
+                                                                     pattern = "^Rp[ls].*",
+                                                                     assay   = "RNA"
+                                                                     )
+head(scRNAseq_Seurat_R26P27@meta.data)
+
+# Mitocondrial genes percentage
+scRNAseq_Seurat_R26P27[["percent.mito"]] <- PercentageFeatureSet(object   = scRNAseq_Seurat_R26P27,
+                                        #features = as.vector(as.character(mitoGenes$`Approved symbol`)),
+                                                                 pattern = "^mt-",
+                                                                 assay = "RNA"
+                                                                 )
+head(scRNAseq_Seurat_R26P27@meta.data)
+
+```
+
+### Number of genes and number of RNA (UMIs)
+
+```{r number_of_genes_per_cell}
+
+head(scRNAseq_Seurat_R26P27@meta.data)
+
+# Set minimum number of genes
+min_nFeature <- round(quantile(scRNAseq_Seurat_R26P27@meta.data$nFeature_RNA,
+         probs = 0.05
+         ))
+min_nFeature
+
+# Density distribution of total RNA count
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_R26P27_nbRNA.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P27@meta.data) +
+    geom_histogram(mapping = aes(x = nCount_RNA),
+                   fill = "yellow",
+                   color = "black",
+                   binwidth = 1000
+                   ) +
+    xlab(label = "\nnb of RNA (UMI)") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Density distribution of detected genes
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_R26P27_nbGenes.pdf"), width = 12, height = 12)
+ggplot() +
+    geom_histogram(data = filter(scRNAseq_Seurat_R26P27@meta.data, nFeature_RNA >= 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "blue",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    geom_histogram(data = filter(scRNAseq_Seurat_R26P27@meta.data, nFeature_RNA < 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "grey",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    xlab(label = "\nnb of genes") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Scatter plot nCount_RNA and nFeature_RNA
+p <- ggplot() +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P27@meta.data,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "darkgreen"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P27@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    xlab(label = "\nRNA count (UMI)") +
+    ylab(label = "nb of genes\n") +
+    theme_bw() +
+    geom_hline(yintercept = min_nFeature,
+               color = "red",
+               lty = 2
+               ) +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold")
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_R26P27@meta.data$nCount_RNA) - min(scRNAseq_Seurat_R26P27@meta.data$nCount_RNA))/2,
+                            y = min_nFeature
+                            ),
+              label = min_nFeature,
+              color = "red",
+              size = 15,
+              nudge_y = max(scRNAseq_Seurat_R26P27@meta.data$nFeature_RNA)/20
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_R26P27_nbRNA_vs_nbGene.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "yellow"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Add UMIs/gene to meta.data
+nCount_per_Feature <- scRNAseq_Seurat_R26P27@meta.data$nCount_RNA/scRNAseq_Seurat_R26P27@meta.data$nFeature_RNA
+
+scRNAseq_Seurat_R26P27 <- AddMetaData(object    = scRNAseq_Seurat_R26P27,
+                                      metadata  = nCount_per_Feature,
+                                      col.name  = "nCount_per_Feature"
+                                      )
+
+head(scRNAseq_Seurat_R26P27@meta.data)
+
+# Density distribution of the number of UMIs per gene
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_R26P27_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P27@meta.data) +
+    geom_histogram(mapping = aes(x = nCount_per_Feature,
+                                 y = ..density..
+                                 ),
+                   color = "darkgreen",
+                   fill = "white"
+                   ) +
+        geom_density(mapping = aes(x = nCount_per_Feature),
+                     color = "red",
+                     size = 2
+                 ) +
+    xlab(label = "\nUMIs/gene") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Number of gene filtering
+scRNAseq_Seurat_R26P27_nbGenes <- subset(x = scRNAseq_Seurat_R26P27,
+                                         subset = nFeature_RNA > min_nFeature
+                                         )
+
+# Export meta.data
+write.table(x = scRNAseq_Seurat_R26P27_nbGenes@meta.data,
+            file = "scRNAseq_Seurat_R26P27_nbGenes_metadata.txt",
+            quote = FALSE,
+            sep = ','
+            )
+
+# Append cell filtering table
+cellFiltering_nbGenes <- rbind(cellFiltering,
+                               data.frame(filtering = "nb genes",
+                                          nbOfCells = nrow(scRNAseq_Seurat_R26P27_nbGenes@meta.data)
+                                          )
+                               )
+
+cellFiltering_nbGenes
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P27_cellFiltering_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering_nbGenes,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,10000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_x_discrete(limits = c("no filtering", "nb genes")) +
+    scale_fill_manual(values = c("darkgreen","black")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Mitochondrial genes
+
+```{r QC_filtering}
+
+# Set percentage of count falling in mitochondrial genes
+max_percOfMitoGenes <- 15
+# Scatter plot
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_R26P27_nbGenes@meta.data,
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P27_nbGenes@meta.data,
+                             percent.mito < max_percOfMitoGenes
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "blue"
+               ) +
+    xlab(label = "\nnb of RNA (UMI count)") +
+ylab(label = "\n% mito. genes\n") +
+geom_hline(yintercept = max_percOfMitoGenes,
+           color = "red",
+           lty = 2
+           ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_R26P27@meta.data$nCount_RNA) - min(scRNAseq_Seurat_R26P27@meta.data$nCount_RNA))/2,
+                            y = max_percOfMitoGenes
+                            ),
+              label = paste0(max_percOfMitoGenes," %"),
+              color = "red",
+              size = 15,
+              nudge_y = 2
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_R26P27_nbRNA_vs_percMito.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "y",
+           fill     = "violet"
+           )
+#dev.off()
+
+# Number of feature detected for each cell
+#max_nFeature <- mean(scRNAseq_Seurat_R26P27@meta.data$nFeature_RNA) + 2*sd(scRNAseq_Seurat_R26P27@meta.data$nFeature_RNA)
+
+# Mitochondrial gene filtering
+scRNAseq_Seurat_R26P27_nbGenes_percMito <- subset(x = scRNAseq_Seurat_R26P27_nbGenes,
+                                                  subset = percent.mito < max_percOfMitoGenes
+                                )
+
+# Append cell filtering table
+cellFiltering_nbGenes_percMito <- rbind(cellFiltering_nbGenes,
+                                        data.frame(filtering = "perc. mito.",
+                                                   nbOfCells = nrow(scRNAseq_Seurat_R26P27_nbGenes_percMito@meta.data)
+                                                   )
+                                        )
+
+cellFiltering_nbGenes_percMito
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P27_cellFiltering_nbGenes_percMito.pdf"), width = 12, height = 8)
+ggplot(data = cellFiltering_nbGenes_percMito,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,10000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_x_discrete(limits = c("no filtering","nb genes","perc. mito.")) +
+    scale_fill_manual(values = c("darkgreen","black", "green")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Fraction of reads map to ribosomal proteins
+
+```{r QC_filtering}
+
+# Scatter plot nb of genes and fraction of reads map to ribosomal proteins
+p <- ggplot() +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P27@meta.data,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "darkgreen"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P27@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "grey",
+               fill = "yellow"
+               ) +
+    xlab(label = "\n% ribo prot reads") +
+    ylab(label = "nb of genes\n") +
+    theme_bw() +
+    geom_hline(yintercept = min_nFeature,
+               color = "red",
+               lty = 2
+               ) +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold")
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_R26P27@meta.data$percent.riboProt) - min(scRNAseq_Seurat_R26P27@meta.data$percent.riboProt))/2,
+                            y = min_nFeature
+                            ),
+              label = min_nFeature,
+              color = "red",
+              size = 15,
+              nudge_y = max(scRNAseq_Seurat_R26P27@meta.data$nFeature_RNA)/20
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_R26P27_percRiboProt_vs_nbGene.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "green"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Scatter plot of percent ribo versus percent mito
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_R26P27@meta.data,
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P27@meta.data,
+                             percent.mito < max_percOfMitoGenes,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "blue"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P27@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey",
+               fill = "yellow"
+               ) +
+    xlab(label = "\n% ribo prot reads") +
+ylab(label = "\n% mito. genes\n") +
+geom_hline(yintercept = max_percOfMitoGenes,
+           color = "red",
+           lty = 2
+           ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_R26P27@meta.data$percent.riboProt) - min(scRNAseq_Seurat_R26P27@meta.data$percent.riboProt))/2,
+                            y = max_percOfMitoGenes
+                            ),
+              label = paste0(max_percOfMitoGenes," %"),
+              color = "red",
+              size = 15,
+              nudge_y = 2
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_R26P27_percRiboProt_vs_percMito.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "green"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Check if distribution is multimodal (assuming that the data are drawn from more normals)
+library(mclust)
+
+gmm <- Mclust(scRNAseq_Seurat_R26P27@meta.data$percent.riboProt)
+
+summary(gmm)
+
+```
+
+
+## Data normalization
+
+```{r data_normalization}
+
+# Normalization
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm <- NormalizeData(object                = scRNAseq_Seurat_R26P27_nbGenes_percMito,
+                                                              normalization.method  = "LogNormalize",
+                                                              scale.factor          = 10000
+                                                              )
+
+```
+
+# Assign cell-cycle scores
+
+```{r assign_cellCycle_scores}
+
+# Cell cycle gene markers (present in Seurat)
+str(cc.genes)
+length(cc.genes$s.genes)
+length(cc.genes$g2m.genes)
+
+cc.genes$g2m.genes
+cc.genes$s.genes
+
+# Compute cell cycle scoring  
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm <- CellCycleScoring(object        = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm,
+                                                                 s.features    = cc.genes$s.genes,
+                                                                 g2m.features  = cc.genes$g2m.genes
+                                                                 )
+
+# Check meta data
+colnames(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm@meta.data)
+head(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm@meta.data)
+
+# Plot covariate distribution
+plot(density(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm@meta.data$S.Score))
+
+plot(density(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm@meta.data$G2M.Score))
+
+```
+
+
+# Pre-analysis
+
+This part of analysis aims to (1) find the minimun number of PCs and (2) look at the effect of covariates on clustering.
+
+
+## Find min number of PCs
+
+```{r feature_selection}
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA <- FindVariableFeatures(object            = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm,
+                                                                         selection.method  = variableFeatures_method,
+                                                                         nfeatures         = nFeatures
+                                                                         )
+
+# Mean-variance scatter plot
+#pdf(file = paste0(pathToFigures,"variableFeaturePlot_scRNAseq_R26P27_PCA.pdf"), width = 12, height = 8)
+VariableFeaturePlot(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA)
+#dev.off()
+
+nrow(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA@assays$RNA)
+
+# Data scaling 
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA <- ScaleData(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA,
+                                                              features = rownames(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA)
+                                                              )
+
+# PCA
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA <- RunPCA(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA)
+
+# PCs elbow plot
+PCmin <- 10
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_R26P27_PCA.pdf"), width = 12, height = 12)
+ElbowPlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA,
+          ndims = 50
+          ) +
+    geom_vline(xintercept = PCmin, lty = 2, color = "blue") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Heatmap of each PC
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_R26P27_PCA.pdf"), width = 15, height = 9)
+DimHeatmap(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA,
+           dims = 1:15,
+           ncol = 5
+           )
+#dev.off()
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P27_PCA.pdf"), width = 12, height = 12)
+DimPlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA,
+        reduction = "pca"
+        ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+## Plot PCA and covariates
+
+```{r PCA_and_covariates}
+
+# Extract matrix
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA,
+                                                                              slot = "scale.data"                                              )                                                                 )
+
+head(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix[,1:3])
+
+# Plot density of scaled data
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix_melt <- melt(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix)
+
+head(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix_melt)
+
+colnames(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix_melt) <- c("gene","cell","scaledExprs")
+
+
+#plot(density(exp(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix)))
+
+# Get HVF
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_mvGenes <- HVFInfo(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA,
+                                                                selection.method = "vst"
+                                                                )
+
+head(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_mvGenes)
+nrow(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_mvGenes)
+
+# Get most variable genes
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_mvGenes[order(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_mvGenes$variance.standardized, decreasing = TRUE),] %>% .[1:nFeatures,] -> mvGenes
+
+# Subset matrix
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix_mvGenes <- scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix[as.vector(rownames(mvGenes)),]
+
+nrow(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix_mvGenes)
+
+# PCA analysis
+PC        <- prcomp(data.frame(t(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_matrix_mvGenes)))
+eigVal    <- get_eigenvalue(PC)
+eigValPer <- round(eigVal$variance.percent, digits = 2)
+
+pci       <- data.frame(PC$x,scRNAseq_Seurat_R26P27_nbGenes_percMito_norm@meta.data)
+
+# Plot eigen value
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P27_PCA_eigValPer.pdf"), width = 10, height = 10)
+    #mutate(PC = paste0("PC",PC)) %>%
+ggplot() +
+    geom_bar(data = data.frame(PC = 1:50, eigValPer = eigValPer[1:50]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity"
+             ) +
+    geom_bar(data = data.frame(PC = 1:PCmin, eigValPer = eigValPer[1:PCmin]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity",
+             fill = "blue"
+             ) +
+    xlab(label = "\nPC") +
+    ylab(label = "% variability (eigen value)\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Plot PCA and nb of UMIs
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P27_PCA_nbUMIs.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nCount_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of UMIs",
+                            type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of genes
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P27_PCA_nbGenes.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nFeature_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of genes",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb RNA per gene
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P27_PCA_nbRNA_per_gene.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(colour = nCount_per_Feature),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "UMIs/gene",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P27_PCA_percMito.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = percent.mito),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "% mito",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and cell cycle phase
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P27_PCA_cellCyclePhase.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = Phase),
+               size    = 1#,
+               #pch     = 21
+               ) +
+    #scale_fill_continuous(type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+# Clustering (Using PCmin as identified above)
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust <- FindNeighbors(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA,
+                                                                        dims = 1:PCmin
+                                                                        )
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust <- FindClusters(object     = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+                                                                       resolution = seq(from  = 0,
+                                                                                        to    = 2,
+                                                                                        by    = 0.1
+                                                                                        )
+                                                                       )      
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_R26P27.RDS"
+                        )
+        )
+
+# Save as loom object (!error)
+as.loom(x         = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+        filename  = "cellOrigin_ATRT_scRNAseq_R26P27.loom"
+        )
+    
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_R26P27.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data,
+         prefix          = "RNA_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE,
+         color           = "red"
+         )
+#dev.off()
+
+choosenResolution <- 0.4
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution <- FindClusters(object     = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+                                                                                         resolution = choosenResolution
+                                                                                         )      
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_R26P27_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution@meta.data
+       ) +
+    stat_count(mapping = aes(x     = RNA_snn_res.0.5,
+                             fill  = Phase
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = RNA_snn_res.0.5,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              face     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+# Export meta data (for SCENIC analysis)
+head(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data)
+
+write.table(x      = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data,
+            file   = "scRNAseq_Seurat_R26P27_PCmin_metaData.txt",
+            sep    = ",",
+            quote  = FALSE
+            )
+
+```
+
+## UMAP
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust <- RunUMAP(object       = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+                                                                  dims         = 1:PCmin,
+                                                                  n.neighbors  = 30
+                                                                  )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("RNA_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+# UMAP and nb of UMIs
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_nbUMIs.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+            features = "nCount_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.15,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_nbGenes.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+            features = "nFeature_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.15,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+            features = "nCount_per_Feature",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.15,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_percMito.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+            features = "percent.mito",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.15,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and cell cycle phase
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_cellCyclePhase.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = FALSE,
+        label.size  = 15
+        ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.15,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Boxplot of covariates per cluster
+
+```{r boxplot_and_covariates}
+
+# Boxplot and nb of UMIs
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P27_clust_nbUMIs.pdf"), width = 12, height = 12)
+ ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = log10(nCount_RNA),
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = log10(nCount_RNA)
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "log10(UMI count)\n")+
+    ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P27_clust_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nFeature_RNA,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nFeature_RNA
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "# genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P27_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nCount_per_Feature,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nCount_per_Feature
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "UMIs per gene\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P27_clust_percMito.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = percent.mito,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = percent.mito
+                               ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "% mito genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.50
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers <- FindAllMarkers(object            = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+                                                                                 min.pct           = min_pct,
+                                                                                 logfc.threshold   = min_logfc,
+                                                                                 min.diff.pct      = min_diffPct,
+                                                                                 only.pos          = TRUE,
+                                                                                 min.cells.feature = min_cellsFeature
+                                                                                 )
+
+head(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P27_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10#,
+              #fontface = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = nTop_markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=20))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_R26P27_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 20
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+            file        = paste0(pathToReport,"scRNAseq_R26P27_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+# Copy to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"scRNAseq_R26P27_cluster_geneMarkers.txt"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust,
+            features = "Smarcb1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_R26P27_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = "Smarcb1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "Smarcb1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+icicicicicicicici
+
+## SCENIC Analysis (PCmin)
+
+### Cellular enrichment of regulons using AUC score
+
+#### Import AUC score matrix
+
+```{r import_SCENIC_AUCscore}
+
+# Path to SCENIC result
+pathToSCENICresult <- paste0(pathToThisProject,"svn/analyse/script/SCENIC_R26P27/")
+
+# Import SCENIC AUC score
+scRNAseq_R26P27_scenic_auc_matrix <- read.csv(file = paste0(pathToSCENICresult,"scRNAseq_R26P27_scenic_auc_matrix.csv"))
+head(scRNAseq_R26P27_scenic_auc_matrix)
+
+dim(scRNAseq_R26P27_scenic_auc_matrix)
+
+# Transpose AUC matrix
+scRNAseq_R26P27_scenic_auc_matrix_t <- t(scRNAseq_R26P27_scenic_auc_matrix)
+
+head(scRNAseq_R26P27_scenic_auc_matrix_t)
+
+dim(scRNAseq_R26P27_scenic_auc_matrix_t)
+
+# Density distribution
+scRNAseq_R26P27_scenic_auc_matrix_t_melt <- melt(scRNAseq_R26P27_scenic_auc_matrix_t)
+head(scRNAseq_R26P27_scenic_auc_matrix_t_melt)
+
+AUCthres <- 0.05
+ggplot(data = scRNAseq_R26P27_scenic_auc_matrix_t_melt) +
+    geom_density(mapping = aes(x = value
+                               ),
+                 fill = "grey"
+                 ) +
+    geom_vline(xintercept=AUCthres, color = "red") +
+    theme_bw()
+
+library(EMA)
+
+# Filtering
+scRNAseq_R26P27_scenic_auc_matrix_t_filt <- expFilter(data      = scRNAseq_R26P27_scenic_auc_matrix_t,
+                                                      threshold = AUCthres,
+                                                      p         = 0.05,
+                                                      graph     = TRUE
+                                                      )
+
+dim(scRNAseq_R26P27_scenic_auc_matrix_t_filt)
+
+```
+
+#### Heatmap of AUC score
+
+```{r SCENIC_AUCscore_heatmap}
+
+# Most variable genes
+mvRegulons <- genes.selection(data      = scRNAseq_R26P27_scenic_auc_matrix_t_filt,
+                              thres.num = 50
+                              )
+
+# Subset matrix
+scRNAseq_R26P27_scenic_auc_matrix_t_filt_mvRegulons <- scRNAseq_R26P27_scenic_auc_matrix_t_filt[mvRegulons,]
+
+# Check order
+all(rownames(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data) == colnames(scRNAseq_R26P27_scenic_auc_matrix_t_filt_mvRegulons))
+
+# Top annotation
+topAnnot_PCmin <- HeatmapAnnotation(df                      = data.frame(Cluster = as.character(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data[,"RNA_snn_res.0.2"]), check.names = FALSE),
+                                    col                     = list(Cluster = cluster_n8_col),
+                                    gap                     = unit(2,"mm"),
+                                    show_annotation_name    = TRUE,
+                                    annotation_name_gp      = gpar(fontsize    = 20),
+                                    annotation_legend_param = list(fontsize    = 20,
+                                                                   title_gp    = gpar(fontsize = 20, font = 2),
+                                                                   labels_gp   = gpar(fontsize = 20),
+                                                                   grid_width  = unit(12,"mm"),
+                                                                   grid_height = unit(12,"mm"),
+                                                                   ncol        = 1
+                                                                   ),
+                                    simple_anno_size        = unit(2,"cm"),
+                                    na_col                  = "white",
+                                    show_legend             = TRUE
+                                    )
+
+# Define heatmap color
+col_fun = colorRamp2(breaks = c(0,0.2,0.4,0.6), colors = c("cyan","wheat1","red","darkred"))
+
+# Heatmap
+h <- Heatmap(matrix                      = scRNAseq_R26P27_scenic_auc_matrix_t_filt_mvRegulons,
+        clustering_distance_columns = "pearson",
+        clustering_method_columns   = "ward",
+        clustering_distance_rows    = "euclidean",
+        clustering_method_rows      = "ward",
+        cluster_rows                = TRUE,
+        show_row_names              = TRUE,
+        show_column_names           = FALSE,
+        column_title                = "cells",
+        row_title                   = "Top 50 most variable regulons",
+        top_annotation              = topAnnot_PCmin,
+        show_heatmap_legend         = TRUE,
+        column_dend_height          = unit(40, "mm"),
+        column_split                = 4,
+        row_split                   = 4,
+        col                         = col_fun,
+heatmap_legend_param        = list(color_bar      = "continuous",
+                                   grid_width     = unit(0.75,"cm"),
+                                   grid_height    = unit(2,"cm"),
+                                   legend_width   = unit(4,"cm"),
+                                   title          = "AUC\n score\n",
+                                   title_gp       = gpar(fontsize = 20),
+                                   legend_gp      = gpar(fontsize = 20),
+                                   title_position = "topcenter"
+                                   )
+)
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_SCENIC_AUCscore.pdf"), width = 12, height = 12)
+draw(h, heatmap_legend_side = "left")
+#dev.off()
+
+```
+
+#### UMAP of cells based on AUC score
+
+```{r AUCscore_umap}
+
+# Compute UMAP
+scRNAseq_R26P27_scenic_auc_umap <- data.frame(umap(t(scRNAseq_R26P27_scenic_auc_matrix_t_filt_mvRegulons)))
+head(scRNAseq_R26P27_scenic_auc_umap)
+
+colnames(scRNAseq_R26P27_scenic_auc_umap) <- c("UMAP1","UMAP2")
+head(scRNAseq_R26P27_scenic_auc_umap)
+
+# Bind meta data
+scRNAseq_R26P27_scenic_auc_umap_plus <- cbind(scRNAseq_R26P27_scenic_auc_umap,
+                                              cluster = as.character(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data$RNA_snn_res.0.2)
+                                              )
+
+head(scRNAseq_R26P27_scenic_auc_umap_plus)
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_SCENIC_AUCscore.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_R26P27_scenic_auc_umap_plus,
+       mapping = aes(x = UMAP1, y = UMAP2)
+       ) +
+    geom_point(mapping = aes(color = cluster
+                             ),
+               size = 2
+               )+
+    xlab("UMAP1") +
+    ylab("UMAP2") +
+    ggtitle(NULL) +
+    theme_bw()+
+    theme(text               = element_text(size = 20),
+          legend.position    = "none"
+          #legend.title       = element_text(face = "bold"),
+          #legend.key.height  = unit(1.5,"cm")
+          )
+#dev.off()
+
+```	
+
+### Cellular enrichment of regulons using binarized AUC score
+
+#### Import binarized AUC score matrix
+
+```{r import_SCENIC_bin_AUCscore}
+
+# Import SCENIC AUC score
+scRNAseq_R26P27_scenic_auc_matrix_bin <- read.csv(file = paste0(pathToSCENICresult,"scRNAseq_R26P27_scenic_auc_matrix_bin.csv"))
+head(scRNAseq_R26P27_scenic_auc_matrix_bin)
+
+dim(scRNAseq_R26P27_scenic_auc_matrix_bin)
+
+# Transpose AUC_BIN matrix
+scRNAseq_R26P27_scenic_auc_matrix_bin_t <- t(scRNAseq_R26P27_scenic_auc_matrix_bin)
+
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t)
+
+dim(scRNAseq_R26P27_scenic_auc_matrix_bin_t)
+
+# Density distribution
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_melt <- melt(scRNAseq_R26P27_scenic_auc_matrix_bin_t)
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t_melt)
+
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_melt <- mutate(.data = scRNAseq_R26P27_scenic_auc_matrix_bin_t_melt,
+                                                       value = as.character(value)
+                                                       )
+
+ggplot(data = scRNAseq_R26P27_scenic_auc_matrix_bin_t_melt) +
+    geom_bar(mapping = aes(x = value
+                                 ),
+                   stat = "count",
+                   fill = "grey"
+             ) +
+    xlab("\nbinarized AUC score") +
+    ylab("Count\n") +
+    theme_bw()
+
+```
+
+#### Filtering
+
+```{r AUC_bin_filtering}
+
+# Remove all lines where counts are all equal to zero
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ <- scRNAseq_R26P27_scenic_auc_matrix_bin_t[apply(X = scRNAseq_R26P27_scenic_auc_matrix_bin_t,
+                                                                                            MARGIN = 1,
+                                                                                            FUN = function(x) !all(x==0)),
+                                                                                      ]
+
+dim(scRNAseq_R26P27_scenic_auc_matrix_bin_t)
+dim(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ)
+
+# Filtering
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt <- expFilter(data      = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ,
+                                                             threshold = 0.5,
+                                                             p         = 0.05,
+                                                             graph     = TRUE
+                                                             )
+
+dim(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt)
+
+```
+
+#### Heatmap of AUC_BIN score
+
+```{r SCENIC_AUC_BINscore_heatmap}
+
+# Most variable genes
+mvRegulons_auc_bin <- genes.selection(data      = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt,
+                                      thres.num = 50
+                                      )
+
+# Subset matrix
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons <- scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt[mvRegulons_auc_bin,]
+
+# Check order
+all(rownames(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data) == colnames(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons))
+
+# Define heatmap color
+col_fun = colorRamp2(breaks = c(0,1), colors = c("white","black"))
+
+# Heatmap
+h <- Heatmap(matrix                      = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons,
+             clustering_distance_rows    = "binary",
+             clustering_method_rows      = "ward",
+             cluster_rows                = TRUE,
+             cluster_columns             = FALSE,
+             show_row_names              = TRUE,
+             show_row_dend               = FALSE,
+             show_column_names           = FALSE,
+             column_title                = "cells",
+             row_title                   = "Top 50 most variable regulons",
+             top_annotation              = topAnnot_PCmin,
+             column_dend_height          = unit(40, "mm"),
+             column_order                = order(factor(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data[,"RNA_snn_res.0.2"])),
+             column_split                = factor(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data[,"RNA_snn_res.0.2"]),
+             #row_split                   = 2,
+             col                         = col_fun,
+             show_heatmap_legend         = FALSE
+             )
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_SCENIC_AUCbinScore.pdf"), width = 12, height = 12)
+draw(h)
+#dev.off()
+
+```
+
+#### Heatmap of the percentage of cells with activated regulon
+
+```{r heatmap_perc_active_regulon}
+
+# Melt matrix
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt <- melt(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons)
+colnames(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt) <- c("regulon","cellID","AUCbin")
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt)
+
+# Merge matrix and meta data
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus <- merge(x     = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@meta.data["RNA_snn_res.0.2"],
+                                                                              y     = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt,
+                                                                              by.x  = 0,
+                                                                              by.y  = "cellID",
+                                                                              all   = FALSE
+                                                                              )
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus)
+
+# Create table of cluster, regulon and number of cells
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells <- group_by(.data = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus,
+                                                                                          RNA_snn_res.0.2,
+                                                                                          regulon
+                                                                                          ) %>%
+    summarise(number =  n())
+colnames(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells) = c("cluster","regulon","nbCell")
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells)
+
+# Create table of cluster, regulon and number of cells in which regulon is activated
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells <- filter(.data = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus, AUCbin == 1) %>%
+    group_by(RNA_snn_res.0.2,
+             regulon
+             ) %>%
+    summarise(number =  n())
+colnames(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells) = c("cluster","regulon","nbCell_AUCbin1")
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells)
+
+# Create a table of total number of cells and cells in which regulon is activated
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells <- merge(x = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells,
+                                                                                                   y = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells,
+                                                                                                   by = c("cluster","regulon"),
+                                                                                                   all = FALSE
+                                                                                                   )
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells)
+
+# Compute percentage of cells with active regulon
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$activeRegulon <- scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$nbCell_AUCbin1*100/scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$nbCell
+
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells)
+
+# Transform table to matrix (for ComplexHeatmap function)
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix <- spread(data = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells[,c("cluster","regulon","activeRegulon")],
+                                                                                                 key = cluster,
+                                                                                                 value = activeRegulon
+                                                                                                 )
+rownames(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix) <- scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix$regulon
+scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix$regulon <- NULL
+head(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix)
+
+
+
+# Top annotation
+topAnnot_cluster <- HeatmapAnnotation(cluster                  = colnames(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix),
+                                      text                     = anno_text(x= colnames(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix), rot = 0),
+                                      col                      = list(cluster = cluster_n8_col),
+                                      gap                      = unit(4,"mm"),
+                                      show_annotation_name     = FALSE,
+                                      annotation_name_gp       = gpar(fontsize = 20),
+                                      annotation_legend_param  = list(fontsize   = 20,
+                                                                      title_gp    = gpar(fontsize = 20, font = 2),
+                                                                      labels_gp   = gpar(fontsize = 20),
+                                                                      grid_width  = unit(12,"mm"),
+                                                                      grid_height = unit(12,"mm"),
+                                                                      ncol        = 1
+                                                                      ),
+                                      simple_anno_size        = unit(2,"cm"),
+                                      na_col                  = "white",
+                                      show_legend             = FALSE
+                                      )
+
+# Heatmap
+h <- Heatmap(matrix                    = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix,
+             cluster_columns           = FALSE,
+             clustering_distance_rows  = "euclidean",
+             clustering_method_rows    = "average",
+             top_annotation            = topAnnot_cluster,
+             show_row_dend             = FALSE,
+             column_title              = "cluster\n",
+             row_title                 = "Top 50 most variable regulons",
+             column_split              = colnames(MX_plus),
+             show_column_names         = FALSE,
+             heatmap_legend_param        = list(color_bar      = "continuous",
+                                                grid_width     = unit(2,"cm"),
+                                                grid_height    = unit(2,"cm"),
+                                                legend_width   = unit(20,"cm"),
+                                                title          = "\n% of cells with active regulon",
+                                                title_gp       = gpar(fontsize = 20),
+                                                legend_gp      = gpar(fontsize = 20),
+                                                title_position = "topcenter",
+                                                direction = "horizontal"
+                                                )
+             )
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_SCENIC_AUCbinScore_perc.pdf"), width = 12, height = 12)
+draw(h,
+     heatmap_legend_side = "bottom"
+     )
+#dev.off()
+
+```
+
+### Cell type specific regulators
+
+#### Import SCENIC RSS score
+
+```{r import_SCENIC_AUCscore}
+
+# Import SCENIC RSS score
+scRNAseq_R26P27_scenic_rss_matrix <- read.csv(file = paste0(pathToSCENICresult,"scRNAseq_R26P27_scenic_rss_matrix.csv"))
+head(scRNAseq_R26P27_scenic_rss_matrix)
+dim(scRNAseq_R26P27_scenic_rss_matrix)
+
+# Create column of cluster
+scRNAseq_R26P27_scenic_rss_matrix$cluster <- rownames(scRNAseq_R26P27_scenic_rss_matrix)
+head(scRNAseq_R26P27_scenic_rss_matrix)
+
+# Density distribution
+scRNAseq_R26P27_scenic_rss_matrix_melt <- melt(scRNAseq_R26P27_scenic_rss_matrix)
+head(scRNAseq_R26P27_scenic_rss_matrix_melt)
+
+ggplot(data = scRNAseq_R26P27_scenic_auc_matrix_bin_t_melt) +
+    geom_density(mapping = aes(x = value),
+                   fill = "grey"
+             ) +
+    xlab("\nRSS score") +
+    ylab("density\n") +
+    theme_bw()
+
+# Convert variable column (regulon) into factor
+scRNAseq_R26P27_scenic_rss_matrix_melt$variable <- factor(scRNAseq_R26P27_scenic_rss_matrix_melt$variable)
+
+head(scRNAseq_R26P27_scenic_rss_matrix_melt)
+
+# Plot RSS per cluster
+scRNAseq_R26P27_scenic_rss_plot_list = list()
+for (cluster in levels(factor(scRNAseq_R26P27_scenic_rss_matrix_melt$cluster)))
+{
+    # Select cluster 
+    f <- scRNAseq_R26P27_scenic_rss_matrix_melt[which(scRNAseq_R26P27_scenic_rss_matrix_melt$cluster == cluster),]
+    # Pick top 5 regulons
+    top5 <- f[order(f$value, decreasing = TRUE),] %>% .[1:5,"variable"]
+    # Plot RSS for each regulon
+    p <- ggplot(data = f,
+                mapping = aes(x = reorder(variable,-value),
+                              y = value
+                              )
+                ) +
+        ggtitle(cluster) +
+        xlab("regulon") +
+        ylab("RSS score") +
+        geom_point(color = "blue") +
+        geom_point(data = filter(f, variable %in% top5),
+                   color = "red",
+                   size = 2
+                   ) + 
+        geom_text_repel(data = filter(f, variable %in% top5),
+                        mapping = aes(label = variable),
+                        color = "red",
+                        size = 5
+                        ) + 
+        theme_bw() +
+        theme(text = element_text(size = 20),
+              axis.ticks.x = element_blank(),
+              axis.text.x = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              plot.title = element_text(hjust = 0.5, face = "bold", size = 30)
+              )
+    # Append list of plot
+    scRNAseq_R26P27_scenic_rss_plot_list[[length(scRNAseq_R26P27_scenic_rss_plot_list)+1]] <- p
+}
+
+library(ggpubr)
+
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_SCENIC_RSS.pdf"), width = 16, height = 12)
+ggarrange(plotlist = scRNAseq_R26P27_scenic_rss_plot_list)
+#dev.off()
+
+```
+
+
+
+# Clustering (Using PCmin=50)
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50 <- FindNeighbors(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA,
+                                                                             dims = 1:50
+                                                                             )
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50 <- FindClusters(object     = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+                                                                       resolution = seq(from  = 0,
+                                                                                        to    = 2,
+                                                                                        by    = 0.1
+                                                                                        )
+                                                                       )      
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_R26P27_PC50.rds"
+                        )
+        )
+
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+colnames(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data)
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_R26P27_PC50.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data,
+         prefix          = "RNA_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE,
+         color           = "red"
+         )
+#dev.off()
+
+choosenResolution <- 0.2
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution <- FindClusters(object     = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+                                                                                              resolution = choosenResolution
+                                                                                              )      
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_R26P27_PC50_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution@meta.data
+       ) +
+    stat_count(mapping = aes(x     = RNA_snn_res.0.2,
+                             fill  = Phase
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = RNA_snn_res.0.2,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5#,
+              #fontface     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+# Export meta data (for SCENIC analysis)
+head(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data)
+
+write.table(x      = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data,
+            file   = "scRNAseq_Seurat_R26P27_PC50_metaData.txt",
+            sep    = ",",
+            quote  = FALSE
+            )
+
+```
+
+## UMAP
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50 <- RunUMAP(object       = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+                                                                       dims         = 1:50,
+                                                                       n.neighbors  = 30
+                                                                       )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_PC50.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("RNA_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+# UMAP and nb of UMIs
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_PC50_nbUMIs.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "nFeature_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_PC50_nbGenes.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "nCount_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_PC50_nbRNA_per_gene.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "nCount_per_Feature",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_PC50_percMito.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "percent.mito",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and cell cylce phase
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_clust_PC50_cellCyclePhase.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Boxplot of covariates per cluster
+
+```{r umap_and_covariates}
+
+# Boxplot and nb of UMIs
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P27_clust_PC50_nbUMIs.pdf"), width = 12, height = 12)
+ ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = log10(nCount_RNA),
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = log10(nCount_RNA)
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "log10(UMI count)\n")+
+    ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P27_clust_PC50_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nFeature_RNA,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nFeature_RNA
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "# genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P27_clust_PC50_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nCount_per_Feature,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nCount_per_Feature
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "UMIs per gene\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P27_clust_PC50_percMito.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = percent.mito,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = percent.mito
+                               ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "% mito genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.50
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers <- FindAllMarkers(object            = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution,
+                                                                                 min.pct           = min_pct,
+                                                                                 logfc.threshold   = min_logfc,
+                                                                                 min.diff.pct      = min_diffPct,
+                                                                                 only.pos          = TRUE,
+                                                                                 min.cells.feature = min_cellsFeature
+                                                                                 )
+
+head(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P27_PC50_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10,
+              face = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_PC50_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution,
+          features = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_PC50_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution,
+          features = nTop_markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=20))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_R26P27_PC50_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 20
+scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers,
+            file        = paste0(pathToReport,"scRNAseq_R26P27_cluster_PC50_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_PC50_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "SMARCB1",
+            pt.size  = 1,
+            reduction = "umap"
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_R26P27_PC50_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution,
+        features = "SMARCB1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+icicicicicicici
+
+## SCENIC Analysis (PC50)
+
+### Cellular enrichment of regulons using AUC score
+
+#### Heatmap of AUC score
+
+```{r SCENIC_AUCscore_heatmap}
+
+# Check order
+all(rownames(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) == colnames(scRNAseq_R26P27_scenic_auc_matrix_t_filt_mvRegulons))
+
+head(colnames(scRNAseq_R26P27_PC50_scenic_auc_matrix_t_filt_mvRegulons))
+
+# Top annotation
+topAnnot_PC50 <- HeatmapAnnotation(df                      = data.frame(Cluster = as.character(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data[,"RNA_snn_res.0.2"]), check.names = FALSE),
+                                   col                     = list(Cluster = cluster_n8_col),
+                                   gap                     = unit(2,"mm"),
+                                   show_annotation_name    = TRUE,
+                                   annotation_name_gp      = gpar(fontsize    = 20),
+                                   annotation_legend_param = list(fontsize    = 20,
+                                                                  title_gp    = gpar(fontsize = 20, font = 2),
+                                                                  labels_gp   = gpar(fontsize = 20),
+                                                                  grid_width  = unit(12,"mm"),
+                                                                  grid_height = unit(12,"mm"),
+                                                                  ncol        = 1
+                                                                  ),
+                                   simple_anno_size        = unit(2,"cm"),
+                                   na_col                  = "white",
+                                   show_legend             = TRUE
+                                   )
+
+# Define heatmap color
+col_fun = colorRamp2(breaks = c(0,0.2,0.4,0.6), colors = c("cyan","wheat1","red","darkred"))
+
+# Heatmap
+h <- Heatmap(matrix                      = scRNAseq_R26P27_scenic_auc_matrix_t_filt_mvRegulons,
+             clustering_distance_columns = "pearson",
+        clustering_method_columns   = "ward",
+        clustering_distance_rows    = "euclidean",
+        clustering_method_rows      = "ward",
+        cluster_rows                = TRUE,
+        show_row_names              = TRUE,
+        show_column_names           = FALSE,
+        column_title                = "cells",
+        row_title                   = "Top 50 most variable regulons",
+        top_annotation              = topAnnot_PC50,
+        show_heatmap_legend         = TRUE,
+        column_dend_height          = unit(40, "mm"),
+        column_split                = 4,
+        row_split                   = 4,
+        col                         = col_fun,
+heatmap_legend_param        = list(color_bar      = "continuous",
+                                   grid_width     = unit(0.75,"cm"),
+                                   grid_height    = unit(2,"cm"),
+                                   legend_width   = unit(4,"cm"),
+                                   title          = "AUC\n score\n",
+                                   title_gp       = gpar(fontsize = 20),
+                                   legend_gp      = gpar(fontsize = 20),
+                                   title_position = "topcenter"
+                                   )
+)
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_PC50_SCENIC_AUCscore.pdf"), width = 12, height = 12)
+draw(h, heatmap_legend_side = "left")
+#dev.off()
+
+```
+
+#### UMAP of cells based on AUC score
+
+```{r AUCscore_umap}
+
+# Bind meta data
+scRNAseq_R26P27_PC50_scenic_auc_umap_plus <- cbind(scRNAseq_R26P27_scenic_auc_umap,
+                                              cluster = as.character(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data$RNA_snn_res.0.2)
+                                              )
+
+head(scRNAseq_R26P27_PC50_scenic_auc_umap_plus)
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P27_PC50_SCENIC_AUCscore.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_R26P27_PC50_scenic_auc_umap_plus,
+       mapping = aes(x = UMAP1, y = UMAP2)
+       ) +
+    geom_point(mapping = aes(color = cluster
+                             ),
+               size = 2
+               )+
+    xlab("UMAP1") +
+    ylab("UMAP2") +
+    ggtitle(NULL) +
+    theme_bw()+
+    theme(text               = element_text(size = 20),
+          legend.position    = "none"
+          #legend.title       = element_text(face = "bold"),
+          #legend.key.height  = unit(1.5,"cm")
+          )
+#dev.off()
+
+```	
+
+### Cellular enrichment of regulons using binarized AUC score
+
+#### Heatmap of AUC_BIN score
+
+```{r SCENIC_AUC_BINscore_heatmap}
+
+# Check order
+all(rownames(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) == colnames(scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons))
+
+# Define heatmap color
+col_fun = colorRamp2(breaks = c(0,1), colors = c("white","black"))
+
+# Heatmap
+h <- Heatmap(matrix                      = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons,
+             clustering_distance_rows    = "binary",
+             clustering_method_rows      = "ward",
+             cluster_rows                = TRUE,
+             cluster_columns             = FALSE,
+             show_row_names              = TRUE,
+             show_row_dend               = FALSE,
+             show_column_names           = FALSE,
+             column_title                = "cells",
+             row_title                   = "Top 50 most variable regulons",
+             top_annotation              = topAnnot_PC50,
+             column_dend_height          = unit(40, "mm"),
+             column_order                = order(factor(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data[,"RNA_snn_res.0.2"])),
+             column_split                = factor(scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data[,"RNA_snn_res.0.2"]),
+             #row_split                   = 2,
+             col                         = col_fun,
+             show_heatmap_legend         = FALSE
+             )
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_PC50_SCENIC_AUCbinScore.pdf"), width = 12, height = 12)
+draw(h)
+#dev.off()
+
+```
+
+#### Heatmap of the percentage of cells with activated regulon
+
+```{r heatmap_perc_active_regulon}
+
+# Merge matrix and meta data
+scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus <- merge(x     = scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust_PC50@meta.data["RNA_snn_res.0.2"],
+                                                                                   y     = scRNAseq_R26P27_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt,
+                                                                                   by.x  = 0,
+                                                                                   by.y  = "cellID",
+                                                                                   all   = FALSE
+                                                                                   )
+head(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus)
+
+# Create table of cluster, regulon and number of cells
+scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells <- group_by(.data = scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus,
+                                                                                          RNA_snn_res.0.2,
+                                                                                          regulon
+                                                                                          ) %>%
+    summarise(number =  n())
+colnames(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells) = c("cluster","regulon","nbCell")
+head(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells)
+
+# Create table of cluster, regulon and number of cells in which regulon is activated
+scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells <- filter(.data = scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus, AUCbin == 1) %>%
+    group_by(RNA_snn_res.0.2,
+             regulon
+             ) %>%
+    summarise(number =  n())
+colnames(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells) = c("cluster","regulon","nbCell_AUCbin1")
+head(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells)
+
+# Create a table of total number of cells and cells in which regulon is activated
+scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells <- merge(x = scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells,
+                                                                                                   y = scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells,
+                                                                                                   by = c("cluster","regulon"),
+                                                                                                   all = FALSE
+                                                                                                   )
+head(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells)
+
+# Compute percentage of cells with active regulon
+scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$activeRegulon <- scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$nbCell_AUCbin1*100/scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$nbCell
+
+head(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells)
+
+# Transform table to matrix (for ComplexHeatmap function)
+scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix <- spread(data = scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells[,c("cluster","regulon","activeRegulon")],
+                                                                                                 key = cluster,
+                                                                                                 value = activeRegulon
+                                                                                                 )
+rownames(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix) <- scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix$regulon
+scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix$regulon <- NULL
+head(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix)
+
+
+
+# Top annotation
+topAnnot_cluster_PC50 <- HeatmapAnnotation(cluster                  = colnames(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix),
+                                           text                     = anno_text(x= colnames(scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix), rot = 0),
+                                           col                      = list(cluster = cluster_n8_col),
+                                           gap                      = unit(4,"mm"),
+                                           show_annotation_name     = FALSE,
+                                           annotation_name_gp       = gpar(fontsize = 20),
+                                           annotation_legend_param  = list(fontsize   = 20,
+                                                                           title_gp    = gpar(fontsize = 20, font = 2),
+                                                                           labels_gp   = gpar(fontsize = 20),
+                                                                           grid_width  = unit(12,"mm"),
+                                                                           grid_height = unit(12,"mm"),
+                                                                           ncol        = 1
+                                                                           ),
+                                           simple_anno_size        = unit(2,"cm"),
+                                           na_col                  = "white",
+                                           show_legend             = FALSE
+                                           )
+
+# Heatmap
+h <- Heatmap(matrix                    = scRNAseq_R26P27_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix,
+             cluster_columns           = FALSE,
+             clustering_distance_rows  = "euclidean",
+             clustering_method_rows    = "average",
+             top_annotation            = topAnnot_cluster_PC50,
+             show_row_dend             = FALSE,
+             column_title              = "cluster\n",
+             row_title                 = "Top 50 most variable regulons",
+             column_split              = colnames(MX_plus),
+             show_column_names         = FALSE,
+             heatmap_legend_param        = list(color_bar      = "continuous",
+                                                grid_width     = unit(2,"cm"),
+                                                grid_height    = unit(2,"cm"),
+                                                legend_width   = unit(20,"cm"),
+                                                title          = "\n% of cells with active regulon",
+                                                title_gp       = gpar(fontsize = 20),
+                                                legend_gp      = gpar(fontsize = 20),
+                                                title_position = "topcenter",
+                                                direction = "horizontal"
+                                                )
+             )
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_PC50_SCENIC_AUCbinScore_perc.pdf"), width = 12, height = 12)
+draw(h,
+     heatmap_legend_side = "bottom"
+     )
+#dev.off()
+
+```
+
+### Cell type specific regulators
+
+#### Import SCENIC RSS score
+
+```{r import_SCENIC_AUCscore}
+
+# Import SCENIC RSS score
+scRNAseq_R26P27_PC50_scenic_rss_matrix <- read.csv(file = paste0(pathToSCENICresult,"scRNAseq_R26P27_PC50_scenic_rss_matrix.csv"))
+head(scRNAseq_R26P27_PC50_scenic_rss_matrix)
+dim(scRNAseq_R26P27_PC50_scenic_rss_matrix)
+
+# Create column of cluster
+scRNAseq_R26P27_PC50_scenic_rss_matrix$cluster <- rownames(scRNAseq_R26P27_PC50_scenic_rss_matrix)
+head(scRNAseq_R26P27_PC50_scenic_rss_matrix)
+
+# Density distribution
+scRNAseq_R26P27_PC50_scenic_rss_matrix_melt <- melt(scRNAseq_R26P27_PC50_scenic_rss_matrix)
+head(scRNAseq_R26P27_PC50_scenic_rss_matrix_melt)
+
+ggplot(data = scRNAseq_R26P27_PC50_scenic_rss_matrix_melt) +
+    geom_density(mapping = aes(x = value),
+                   fill = "grey"
+             ) +
+    xlab("\nRSS score") +
+    ylab("density\n") +
+    theme_bw()
+
+# Convert variable column (regulon) into factor
+scRNAseq_R26P27_PC50_scenic_rss_matrix_melt$variable <- factor(scRNAseq_R26P27_PC50_scenic_rss_matrix_melt$variable)
+
+head(scRNAseq_R26P27_PC50_scenic_rss_matrix_melt)
+
+# Plot RSS per cluster
+scRNAseq_R26P27_PC50_scenic_rss_plot_list = list()
+for (cluster in levels(factor(scRNAseq_R26P27_PC50_scenic_rss_matrix_melt$cluster)))
+{
+    # Select cluster 
+    f <- scRNAseq_R26P27_PC50_scenic_rss_matrix_melt[which(scRNAseq_R26P27_PC50_scenic_rss_matrix_melt$cluster == cluster),]
+    # Pick top 5 regulons
+    top5 <- f[order(f$value, decreasing = TRUE),] %>% .[1:5,"variable"]
+    # Plot RSS for each regulon
+    p <- ggplot(data = f,
+                mapping = aes(x = reorder(variable,-value),
+                              y = value
+                              )
+                ) +
+        ggtitle(cluster) +
+        xlab("regulon") +
+        ylab("RSS score") +
+        geom_point(color = "blue") +
+        geom_point(data = filter(f, variable %in% top5),
+                   color = "red",
+                   size = 2
+                   ) + 
+        geom_text_repel(data = filter(f, variable %in% top5),
+                        mapping = aes(label = variable),
+                        color = "red",
+                        size = 5
+                        ) + 
+        theme_bw() +
+        theme(text = element_text(size = 20),
+              axis.ticks.x = element_blank(),
+              axis.text.x = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              plot.title = element_text(hjust = 0.5, face = "bold", size = 30)
+              )
+    # Append list of plot
+    scRNAseq_R26P27_PC50_scenic_rss_plot_list[[length(scRNAseq_R26P27_PC50_scenic_rss_plot_list)+1]] <- p
+}
+
+library(ggpubr)
+
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P27_PC50_SCENIC_RSS.pdf"), width = 16, height = 12)
+ggarrange(plotlist = scRNAseq_R26P27_PC50_scenic_rss_plot_list)
+#dev.off()
+
+```
+
+
+# inferCNV analysis
+
+## Create inferCNV object
+
+### Extract raw count matrix
+
+```{r extract_rawCount}
+
+# Extract raw count matrix
+scRNAseq_rawCount_R26P27 <- scRNAseq_Seurat_R26P27_nbGenes_percMito_norm_PCA_clust@assays$RNA@counts
+
+head(scRNAseq_rawCount_R26P27[,1:4])
+dim(scRNAseq_rawCount_R26P27)
+
+```
+
+### Create gene position file
+
+```{r gene_order_file}
+
+# Import gene position file
+gene_position <- read.table(file = paste0(pathToData,"mm10_gene_pos_ucsc_refFlat.txt"),
+                            header = TRUE,
+                            sep = "\t"
+                            )
+colnames(gene_position) <- c("gene","chr","start","end")
+head(gene_position)
+nrow(gene_position)
+
+# Remove duplicated gene name
+gene_position_plus <- gene_position[!duplicated(gene_position$gene),]
+nrow(gene_position_plus)
+
+# Keep only genes present in matrix
+gene_position_Plus <- filter(.data = gene_position_plus,
+                             gene %in% rownames(scRNAseq_rawCount_R26P27)
+                             )
+head(gene_position_Plus)
+nrow(gene_position_Plus)
+
+# Export gene position table
+write.table(file       = "R26P27_gene_position.txt",
+            x          = gene_position_Plus,
+            row.names  = FALSE,
+            col.names  = FALSE,
+            quote      = FALSE,
+            sep        = "\t"
+            )
+
+```
+
+
+### Generate annotation file
+
+```{r generate_annotation_file}
+
+# Import non-tumoral cell IDs
+R26P27_nonTumCell_IDs <- read.table(file = paste0(pathToReport,'scRNAseq_integrated_R26P27_nonTumCell_IDs.txt'),
+                                    sep = '\n'
+                                    )
+head(R26P27_nonTumCell_IDs)
+
+# Create cell annotation table
+R26P27_cell_annotation <- data.frame(cellID = colnames(scRNAseq_rawCount_R26P27)
+                                     )
+head(R26P27_cell_annotation)
+
+R26P27_cell_annotation_plus <- mutate(.data = R26P27_cell_annotation,
+                                      cellOrigin = case_when(cellID %in% R26P27_nonTumCell_IDs$V1 ~ "non-tumoral",
+                                                             TRUE ~ "tumoral"
+                                                             )
+                                      )
+
+tail(R26P27_cell_annotation_plus)
+
+levels(factor(R26P27_cell_annotation_plus$cellOrigin))
+
+# Export cell annotation table
+write.table(file       = "R26P27_cell_annotation.txt",
+            x          =  R26P27_cell_annotation_plus,
+            row.names  = FALSE,
+            col.names  = FALSE,
+            quote      = FALSE,
+            sep        = "\t"
+            )
+
+
+
+```
+
+### Create infercnv object
+
+```{r create_infercnv_object}
+
+# Create inferCNV object
+R26P27_infercnvObject <- CreateInfercnvObject(raw_counts_matrix        = scRNAseq_rawCount_R26P27,
+                                              gene_order_file          = "R26P27_gene_position.txt",
+                                              annotations_file         = "R26P27_cell_annotation.txt",
+                                              ref_group_names          = "non-tumoral",
+                                              delim                    = "\t",
+                                              max_cells_per_group      = NULL,
+                                              min_max_counts_per_cell  = NULL,
+                                              chr_exclude              = c("chrX","chrY","chrM")
+                                              )
+
+
+```
+
+### Run inferCNV
+
+```{r run_infercnv}
+
+# Create inferCNV object
+R26P27_infercnvObject_res <- infercnv::run(infercnv_obj       = R26P27_infercnvObject,
+                                           cutoff             = 0.1,
+                                           out_dir            = tempfile(), 
+                                           cluster_by_groups  = TRUE, 
+                                           denoise            = TRUE,
+                                           HMM                = TRUE,
+                                           num_threads        = 6,
+                                           no_plot            = TRUE
+                                           )
+
+```
+
+### Explore inferCNV result
+
+```{r explore_infercnv}
+
+str(R26P27_infercnvObject_res)
+
+# Processed expession matrix
+head(R26P27_infercnvObject_res@expr.data[,1:4])
+
+# List of normal cell indices
+R26P27_infercnvObject_res@reference_grouped_cell_indices
+
+# List of tumor cell indices
+R26P27_infercnvObject_res@observation_grouped_cell_indices
+
+```
+
+### Plot CNV with plot_cnv
+
+```{r plot_cnv}
+
+# Plot CNV
+plot_cnv(infercnv_obj        = R26P27_infercnvObject_res,
+         out_dir             = "./inferCNV_R26P27",
+         title               = "inferCNV",
+         obs_title           = "Observations (Cells)",
+         ref_title           = "References (Cells)",
+         cluster_by_groups   = TRUE,
+         cluster_references  = FALSE,
+         plot_chr_scale      = FALSE,
+         chr_lengths         = NULL,
+         k_obs_groups        = 3,
+         contig_cex          = 1,
+         x.center            = mean(R26P27_infercnvObject@expr.data),
+         x.range             = "auto",
+         hclust_method       = "ward.D",
+         custom_color_pal    = NULL,
+         color_safe_pal      = FALSE,
+         output_filename     = "R26P27_infercnv",
+         output_format       = "pdf",
+         png_res             = 300,
+         dynamic_resize      = 0,
+         ref_contig          = NULL,
+         write_expr_matrix   = FALSE,
+         useRaster           = FALSE
+         )
+
+```
+
+icicicicicicicicici
+
+### Plot CNV with ComplexHeatmap
+
+#### Plot for all chr
+
+```{r complexheatmap}
+
+# Extract processed expression data
+R26P27_infercnvObject_res_expr <- data.frame(R26P27_infercnvObject_res@expr.data, check.names = FALSE)
+
+head(R26P27_infercnvObject_res_expr[,1:2])
+dim(R26P27_infercnvObject_res_expr)
+
+# Transpose matrix
+R26P27_infercnvObject_res_expr_t <- data.frame(t(R26P27_infercnvObject_res_expr), check.names = FALSE)
+
+head(R26P27_infercnvObject_res_expr_t[,1:10])
+dim(R26P27_infercnvObject_res_expr_t)
+
+# Check order for row split
+all(R26P27_cell_annotation$cell_ID == rownames(R26P27_infercnvObject_res_expr_t))
+
+# Top annotation
+head(gene_position_Plus)
+
+# Subset genes in matrix
+gene_position_Plus_all <- filter(.data = gene_position_Plus,
+                                 gene %in% colnames(R26P27_infercnvObject_res_expr_t)
+                                 )
+
+# Order chromosome column
+
+chrs <- data.frame(chr = c("chr1","chr2","chr3","chr4","chr5","chr6","chr7","chr8","chr9","chr10","chr11","chr12","chr13","chr14","chr15","chr16","chr17","chr18","chr19","chr20","chr21","chr22")
+                   )
+
+gene_position_Plus_all_plus <- left_join(x = chrs,
+                                         y = gene_position_Plus_all,
+                                         by = "chr"
+                                         )
+
+# Check order
+all(gene_position_Plus_all_plus$gene == colnames(R26P27_infercnvObject_res_expr_t))
+
+R26P27_infercnvObject_res_expr_t_all <- R26P27_infercnvObject_res_expr_t[,as.vector(gene_position_Plus_all_plus$gene)]
+
+all(gene_position_PLUS_all_plus$gene == colnames(R26P27_infercnvObject_res_expr_t_all))
+
+tail(gene_position_PLUS_all_plus)
+
+levels(factor(gene_position_PLUS_all_plus$chr))
+
+# Complexheatmap
+#pdf(file = paste0(pathToFigures,"inferCNV_scRNAseq_INI255_tumor_Tcells_all.pdf"), width = 16, height = 10)
+Heatmap(matrix               = R26P27_infercnvObject_res_expr_t_all,
+        cluster_columns      = FALSE,
+        show_row_dend        = FALSE,
+        jitter               = TRUE,
+        show_column_names    = FALSE,
+        show_row_names       = FALSE,
+        row_split            = IN254_cell_annotation$cell_type,
+        column_split         = gene_position_PLUS_all_plus$chr ,
+        column_title_rot     = 90,
+        column_order         = colnames(R26P27_infercnvObject_res_expr_t_all),
+        row_gap              = unit(5, "mm"),
+        show_heatmap_legend  = FALSE
+        )
+#dev.off()
+
+```
+
+#### Plot for all chr for down sampled cells
+
+```{r complexheatmap}
+
+# Down sample cells
+IN254_cell_annotation_n <- sample_n(IN254_cell_annotation,
+                                    1000
+                                    )
+
+head(IN254_cell_annotation_n)
+
+# Subset matrix of down sampled cells
+R26P27_infercnvObject_res_expr_t_n <- R26P27_infercnvObject_res_expr_t[as.vector(IN254_cell_annotation_n$cell_ID),]
+
+# Check order for row split
+all(IN254_cell_annotation_n$cell_ID == rownames(R26P27_infercnvObject_res_expr_t_n))
+
+# Order chromosome column
+chrs <- data.frame(chr = c("chr1","chr2","chr3","chr4","chr5","chr6","chr7","chr8","chr9","chr10","chr11","chr12","chr13","chr14","chr15","chr16","chr17","chr18","chr19","chr20","chr21","chr22")
+                   )
+gene_position_PLUS_all_plus <- left_join(x = chrs,
+                                         y = gene_position_PLUS_all,
+                                         by = "chr"
+                                         )
+
+# Check order
+all(gene_position_PLUS_all_plus$gene == colnames(R26P27_infercnvObject_res_expr_t_n))
+
+R26P27_infercnvObject_res_expr_t_all_n <- R26P27_infercnvObject_res_expr_t_n[,as.vector(gene_position_PLUS_all_plus$gene)]
+
+all(gene_position_PLUS_all_plus$gene == colnames(R26P27_infercnvObject_res_expr_t_all_n))
+
+head(gene_position_PLUS_all_plus)
+
+head(R26P27_infercnvObject_res_expr_t_all_n[,1:3])
+
+head(as.matrix(R26P27_infercnvObject_res_expr_t_all_n[,1:3]))
+
+# Complexheatmap
+#pdf(file = paste0(pathToFigures,"inferCNV_scRNAseq_INI255_tumor_Tcells_all_n.pdf"), width = 16, height = 10)
+Heatmap(matrix               = R26P27_infercnvObject_res_expr_t_all_n,
+        cluster_columns      = FALSE,
+        show_row_dend        = FALSE,
+        #jitter               = TRUE,
+        show_column_names    = FALSE,
+        show_row_names       = FALSE,
+        row_split            = IN254_cell_annotation_n$cell_type,
+        column_split         = gene_position_PLUS_all_plus$chr,
+        column_title_rot     = 90,
+        #column_order         = colnames(R26P27_infercnvObject_res_expr_t_all_n),
+        row_gap              = unit(5, "mm"),
+        show_heatmap_legend  = FALSE
+        )
+#dev.off()
+
+```
+
+
+#### Plot for chr22 (to check SMARCB1 CNV)
+
+```{r complexheatmap}
+
+# Subset chr22 genes
+gene_position_PLUS_chr22 <- filter(.data = gene_position_PLUS,
+                                   chr   == "chr22"
+                                   )
+
+head(gene_position_PLUS_chr22)
+dim(gene_position_PLUS_chr22)
+
+# Subset chr22 genes in matrix
+gene_position_PLUS_chr22 <- filter(.data = gene_position_PLUS_chr22,
+                                   gene %in% colnames(R26P27_infercnvObject_res_expr_t)
+                                   )
+
+
+head(gene_position_PLUS_chr22)
+dim(gene_position_PLUS_chr22)
+
+
+# Subset matrix
+R26P27_infercnvObject_res_expr_t_chr22 <- R26P27_infercnvObject_res_expr_t[,as.vector(gene_position_PLUS_chr22$gene)]
+
+dim(R26P27_infercnvObject_res_expr_t_chr22)
+
+# Check order for row split
+all(IN254_cell_annotation$cell_ID == rownames(R26P27_infercnvObject_res_expr_t_chr22))
+
+
+# Complexheatmap
+Heatmap(matrix           = R26P27_infercnvObject_res_expr_t_chr22,
+        cluster_columns  = FALSE,
+        show_row_dend    = FALSE,
+        jitter           = TRUE,
+        show_row_names   = FALSE,
+        row_split        = IN254_cell_annotation$cell_type
+        )
+
+```
+
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

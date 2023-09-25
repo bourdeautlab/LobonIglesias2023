@@ -1,0 +1,2681 @@
+---
+title: "Human ATRT RNAseq data"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "murine_RT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("murine_RT_scRNAseq_integrated_R26P87_R26P27_R26P26.RData")
+
+#save.image(file="murine_RT_scRNAseq_integrated_R26P87_R26P27_R26P26.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("../plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+
+```
+
+```{r delete_all_objects}
+
+# Delete all objects
+#rm(list = ls())
+
+```
+
+# Load normalized Seurat object
+
+## R26P87
+
+```{r load_R26P87_data}
+
+scRNAseq_Seurat_R26P87 <- readRDS(file   = paste0(pathToReport,"scRNAseq_Seurat_R26P87.RDS")
+                                  )
+
+```
+
+## R26P27
+
+```{r load_R26P27_data}
+
+scRNAseq_Seurat_R26P27 <- readRDS(file   = paste0(pathToReport,"scRNAseq_Seurat_R26P27.RDS")
+                                  )
+
+```
+
+## R26P26
+
+```{r load_R26P26_data}
+
+scRNAseq_Seurat_R26P26 <- readRDS(file   = paste0(pathToReport,"scRNAseq_Seurat_R26P26.RDS")
+                                  )
+
+```
+
+
+# Integrate seurat object
+
+```{r integrated_seurat_object}
+
+# Create named list of seurat object
+seurat_object_list <- list(R26P87 = scRNAseq_Seurat_R26P87,
+                           R26P27 = scRNAseq_Seurat_R26P27,
+                           R26P26 = scRNAseq_Seurat_R26P26
+                           )
+
+# Find anchors
+max_dim <- 30
+scRNAseq_Seurat_anchors <- FindIntegrationAnchors(object.list           = seurat_object_list,
+                                                  assay                 = NULL,
+                                                  reference             = NULL,
+                                                  anchor.features       = 2000,
+                                                  scale                 = TRUE,
+                                                  normalization.method  = "LogNormalize",
+                                                  sct.clip.range        = NULL,
+                                                  reduction             = "cca",
+                                                  l2.norm               = TRUE,
+                                                  dims                  = 1:max_dim,
+                                                  k.anchor              = 5,
+                                                  k.filter              = 200,
+                                                  k.score               = 30,
+                                                  max.features          = 200,
+                                                  nn.method             = "rann",
+                                                  eps                   = 0,
+                                                  verbose               = TRUE
+                                                  )
+
+# Integrated seurat objects
+scRNAseq_Seurat_integrated_R26 <- IntegrateData(anchorset              = scRNAseq_Seurat_anchors,
+                                            new.assay.name         = "integrated",
+                                            normalization.method   = "LogNormalize",
+                                            features               = NULL,
+                                            features.to.integrate  = NULL,
+                                            dims                   = 1:max_dim,
+                                            k.weight               = 100,
+                                            weight.reduction       = NULL,
+                                            sd.weight              = 1,
+                                            sample.tree            = NULL,
+                                            preserve.order         = FALSE,
+                                            do.cpp                 = TRUE,
+                                            eps                    = 0,
+                                            verbose                = TRUE
+                                            )
+
+```
+
+# Linear dimensional reduction
+
+```{r feature_selection}
+
+# Compute cell cycle scoring  
+scRNAseq_Seurat_integrated_R26 <- CellCycleScoring(object        = scRNAseq_Seurat_integrated_R26,
+                                                   s.features    = str_to_sentence(cc.genes$s.genes),
+                                                   g2m.features  = str_to_sentence(cc.genes$g2m.genes)
+                                                   )
+
+# Data scaling 
+scRNAseq_Seurat_integrated_R26 <- ScaleData(object = scRNAseq_Seurat_integrated_R26,
+                                        features = rownames(scRNAseq_Seurat_integrated_R26)
+                                        )
+
+# PCA
+scRNAseq_Seurat_integrated_R26 <- RunPCA(object = scRNAseq_Seurat_integrated_R26)
+
+# PCs elbow plot
+PCmin <- 9
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_integrated_R26_PCA.pdf"), width = 12, height = 12)
+ElbowPlot(object = scRNAseq_Seurat_integrated_R26,
+          ndims = 50
+          ) +
+    geom_vline(xintercept = PCmin, lty = 2, color = "blue") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Heatmap of each PC
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_integrated_R26_PCA.pdf"), width = 15, height = 12)
+#png(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_integrated_R26_PCA.png"), width = 1000, height = 800)
+DimHeatmap(object = scRNAseq_Seurat_integrated_R26,
+           dims   = 1:15,
+           ncol   = 5,
+           raster = FALSE,
+           assay  = "integrated"
+           )
+#dev.off()
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_PCA.pdf"), width = 12, height = 12)
+DimPlot(object = scRNAseq_Seurat_integrated_R26,
+        reduction = "pca",
+        group.by = "orig.ident"
+        ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "right"
+          )
+#dev.off()
+
+```
+
+# Linear dimensional reduction (without integration, to check integration quality)
+
+```{r linear_dimensional_reduction}
+
+scRNAseq_Seurat_integrated_R26_RNA <- scRNAseq_Seurat_integrated_R26
+
+DefaultAssay(scRNAseq_Seurat_integrated_R26_RNA) <- "RNA"
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_integrated_R26_RNA <- FindVariableFeatures(object            = scRNAseq_Seurat_integrated_R26_RNA,
+                                                           selection.method  = variableFeatures_method,
+                                                           nfeatures         = nFeatures
+                                                           )
+
+# Data scaling 
+scRNAseq_Seurat_integrated_R26_RNA <- ScaleData(object = scRNAseq_Seurat_integrated_R26_RNA,
+                                                features = rownames(scRNAseq_Seurat_integrated_R26)
+                                                )
+
+
+# Extract matrix
+scRNAseq_Seurat_integrated_R26_matrix_RNA <- as.matrix(GetAssayData(object = scRNAseq_Seurat_integrated_R26_RNA,
+                                                                    slot = "scale.data"
+                                                                    )
+                                                       )
+
+head(scRNAseq_Seurat_integrated_R26_matrix_RNA[,1:3])
+dim(scRNAseq_Seurat_integrated_R26_matrix_RNA)
+
+# PCA analysis
+PC_RNA <- prcomp(data.frame(t(scRNAseq_Seurat_integrated_R26_matrix_RNA)))
+eigVal_RNA <- get_eigenvalue(PC_RNA)
+eigValPer_RNA <- round(eigVal_RNA$variance.percent, digits = 2)
+pci_RNA <- data.frame(PC_RNA$x,scRNAseq_Seurat_integrated_R26_RNA@meta.data)
+
+# Plot PCA and sample
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_merge_R26_PCA.pdf"), width = 12, height = 10)
+ggplot(data = pci_RNA,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = orig.ident),
+               size    = 1
+               ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    xlab(paste0("PC1 (",eigValPer_RNA[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer_RNA[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+
+## Plot PCA and covariates
+
+```{r PCA_and_covariates}
+
+# Extract matrix
+scRNAseq_Seurat_integrated_R26_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_integrated_R26,
+                                                                slot = "scale.data"
+                                                                )
+                                                   )
+
+head(scRNAseq_Seurat_integrated_R26_matrix[,1:3])
+dim(scRNAseq_Seurat_integrated_R26_matrix)
+
+# PCA analysis
+PC        <- prcomp(data.frame(t(scRNAseq_Seurat_integrated_R26_matrix)))
+eigVal    <- get_eigenvalue(PC)
+eigValPer <- round(eigVal$variance.percent, digits = 2)
+
+pci       <- data.frame(PC$x,scRNAseq_Seurat_integrated_R26@meta.data)
+
+# Plot eigen value
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integrated_R26_PCA_eigValPer.pdf"), width = 10, height = 10)
+ggplot() +
+    geom_bar(data = data.frame(PC = 1:50, eigValPer = eigValPer[1:50]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity"
+             ) +
+    geom_bar(data = data.frame(PC = 1:PCmin, eigValPer = eigValPer[1:PCmin]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity",
+             fill = "blue"
+             ) +
+    xlab(label = "\nPC") +
+    ylab(label = "% variability (eigen value)\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Plot PCA and sample
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_PCA_sample.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = orig.ident),
+               size    = 1
+               ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of UMIs
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_PCA_nbUMIs.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nCount_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of UMIs",
+                            type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of genes
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_PCA_nbGenes.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nFeature_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of genes",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb RNA per gene
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_PCA_nbRNA_per_gene.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(colour = nCount_per_Feature),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "UMIs/gene",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_PCA_percMito.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = percent.mito),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "% mito",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and cell cycle phase
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_PCA_cellCyclePhase.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = Phase),
+               size    = 1#,
+               #pch     = 21
+               ) +
+    #scale_fill_continuous(type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+## Clustering with all cells
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_integrated_R26 <- FindNeighbors(object = scRNAseq_Seurat_integrated_R26,
+                                                dims   = 1:PCmin
+                                                )
+
+# Clustering by modularity optimization technique
+clustering_resolutions <- seq(from  = 0, to = 2, by = 0.1)
+scRNAseq_Seurat_integrated_R26 <- FindClusters(object     = scRNAseq_Seurat_integrated_R26,
+                                           resolution = clustering_resolutions
+                                           )      
+
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_integrated_R26.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_integrated_R26@meta.data,
+         prefix          = "integrated_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE
+         )
+#dev.off()
+
+choosenResolution <- 0.3
+
+# Clustering by modularity optimization technique
+#scRNAseq_Seurat_integrated_R26_choosenResolution <- FindClusters(object     = scRNAseq_Seurat_integrated_R26,
+ #                                                            resolution = choosenResolution
+  #                                                           )      
+
+# Set default ident
+Idents(scRNAseq_Seurat_integrated_R26) <- scRNAseq_Seurat_integrated_R26@meta.data[["integrated_snn_res.0.3"]]
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_integrated_R26_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_integrated_R26@meta.data
+       ) +
+    stat_count(mapping = aes(x     = integrated_snn_res.0.3,
+                             fill  = orig.ident
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = integrated_snn_res.0.3,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              face     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+scale_fill_manual(name = "Sample", values = c("red","green","blue")) +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+# Export meta data (for SCENIC analysis)
+head(scRNAseq_Seurat_integrated_R26@meta.data)
+
+write.table(x      = scRNAseq_Seurat_integrated_R26@meta.data,
+            file   = "scRNAseq_Seurat_integrated_R26_PCmin_metaData.txt",
+            sep    = ",",
+            quote  = FALSE
+            )
+
+```
+
+## UMAP
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_integrated_R26 <- RunUMAP(object       = scRNAseq_Seurat_integrated_R26,
+                                          dims         = 1:PCmin,
+                                          n.neighbors  = 30
+                                          )
+
+# Plot UMAP and cluster
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_clust.pdf"), width = 12, height = 10)
+DimPlot(object      = scRNAseq_Seurat_integrated_R26,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("integrated_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(#legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# Plot UMAP and sample
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_clust_sample.pdf"), width = 12, height = 10)
+DimPlot(object      = scRNAseq_Seurat_integrated_R26,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "orig.ident"
+        ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_integrated_R26,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_integrated_R26.rds"
+                        )
+        )
+
+# Save as singleCellExperiment object
+scRNAseq_integrated_R26_sce <- as.SingleCellExperiment(x = scRNAseq_Seurat_integrated_R26)
+
+saveRDS(object = scRNAseq_integrated_R26_sce,
+        file   = paste0("scRNAseq_integrated_R26_sce.rds"
+                        )
+        )
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+# UMAP and nb of UMIs
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_clust_nbUMIs.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_integrated_R26,
+            features = "nFeature_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_clust_nbGenes.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_integrated_R26,
+            features = "nCount_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_clust_nbRNA_per_gene.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_integrated_R26,
+            features = "nCount_per_Feature",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_clust_percMito.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_integrated_R26,
+            features = "percent.mito",
+            reduction = "umap"
+            )  +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and cell cycle phase
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_clust_cellCyclePhase.pdf"), width = 12, height = 10)
+DimPlot(object      = scRNAseq_Seurat_integrated_R26,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = FALSE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Boxplot of covariates per cluster
+
+```{r boxplot_and_covariates}
+
+# Boxplot and nb of UMIs
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_integrated_R26_clust_nbUMIs.pdf"), width = 12, height = 12)
+ ggplot(data = scRNAseq_Seurat_integrated_R26@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                              y      = log10(nCount_RNA),
+                              color  = eval(as.name(paste0("integrated_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                               y = log10(nCount_RNA)
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "log10(UMI count)\n")+
+    ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_integrated_R26_clust_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_integrated_R26@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                              y      = nFeature_RNA,
+                              color  = eval(as.name(paste0("integrated_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                               y = nFeature_RNA
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "# genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_integrated_R26_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_integrated_R26@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                              y      = nCount_per_Feature,
+                              color  = eval(as.name(paste0("integrated_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                               y = nCount_per_Feature
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "UMIs per gene\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_integrated_R26_clust_percMito.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_integrated_R26@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                              y      = percent.mito,
+                              color  = eval(as.name(paste0("integrated_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                               y = percent.mito
+                               ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "% mito genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.50
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+pval_thresh      <- 0.01 
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_integrated_R26.markers <- FindAllMarkers(object            = scRNAseq_Seurat_integrated_R26,
+                                                         assay             = "RNA",
+                                                         min.pct           = min_pct,
+                                                         logfc.threshold   = min_logfc,
+                                                         min.diff.pct      = min_diffPct,
+                                                         only.pos          = TRUE,
+                                                         min.cells.feature = min_cellsFeature,
+                                                         return.thresh     = pval_thresh
+                                                         )
+
+head(scRNAseq_Seurat_integrated_R26.markers)
+
+# Save Seurat object as RDS
+saveRDS(object = scRNAseq_Seurat_integrated_R26.markers,
+        file = paste0(pathToReport,"scRNAseq_Seurat_integrated_R26.RDS")
+        )
+
+# Copy saved Seurat object to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"scRNAseq_Seurat_integrated_R26.RDS"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integrated_R26_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_integrated_R26.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10,
+              face = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_integrated_R26.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_integrated_R26.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_integrated_R26_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_integrated_R26,
+          features = scRNAseq_Seurat_integrated_R26.markers$gene,
+          assay    = "integrated",
+          slot     = "scale.data"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_integrated_R26_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_integrated_R26,
+          features = nTop_markers$gene,
+          assay    = "integrated",
+          slot     = "scale.data"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=15))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_integrated_R26_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 20
+scRNAseq_Seurat_integrated_R26.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_integrated_R26.markers,
+            file        = paste0(pathToReport,"scRNAseq_integrated_R26_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+# Copy table to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"scRNAseq_integrated_R26_cluster_geneMarkers.txt"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+
+# Cerebro analysis (for visualization purpose)
+
+## Copy seurat object
+
+```{r export_to_cerebro_format}
+
+scRNAseq_Seurat_integrated_R26_cerebro <- scRNAseq_Seurat_integrated_R26
+scRNAseq_Seurat_integrated_R26_cerebro
+
+head(scRNAseq_Seurat_integrated_R26_cerebro@meta.data)
+
+```
+
+## Clusters relationship trees
+
+```{r export_to_cerebro_format}
+
+# Create vectors of clustering resolutions
+groups <- paste0('integrated_snn_res.',clustering_resolutions)
+groups <- c(groups,'seurat_clusters','orig.ident')
+
+# Build phylogenetic tree for clusters
+for (res in groups[-1])
+{
+    print(res)
+    Idents(scRNAseq_Seurat_integrated_R26_cerebro) <- res
+    scRNAseq_Seurat_integrated_R26_cerebro <- BuildClusterTree(object           = scRNAseq_Seurat_integrated_R26_cerebro,
+                                                               dims             = 1:PCmin,
+                                                               reorder          = FALSE,
+                                                               reorder.numeric  = FALSE
+                                                               )
+    scRNAseq_Seurat_integrated_R26_cerebro@misc$trees[[res]] <- scRNAseq_Seurat_integrated_R26_cerebro@tools$BuildClusterTree
+}
+
+
+```
+
+## Compute percentage of mitochondrial and ribosomal transcripts
+
+```{r cerebro_mito_ribo}
+
+# % of mito and ribo 
+scRNAseq_Seurat_integrated_R26_cerebro <- addPercentMtRibo(object             = scRNAseq_Seurat_integrated_R26_cerebro,
+                                                           organism           = 'mm',
+                                                           gene_nomenclature  = 'name'
+                                                           )
+
+```
+
+## Get most expressed genes
+
+```{r cerebro_most_expressed_genes}
+
+# Most expressed genes
+scRNAseq_Seurat_integrated_R26_cerebro <- getMostExpressedGenes(object  = scRNAseq_Seurat_integrated_R26_cerebro,
+                                                                assay   = 'RNA',
+                                                                groups  = groups
+                                                                )
+
+```
+
+## Get marker genes
+
+```{r cerebro_marker_genes}
+
+# Mark genes
+scRNAseq_Seurat_integrated_R26_cerebro <- getMarkerGenes(object        = scRNAseq_Seurat_integrated_R26_cerebro,
+                                                         assay         = 'RNA',
+                                                         organism      = 'mm',
+                                                         groups        = groups,
+                                                         min_pct       = min_pct,
+                                                         thresh_logFC  = min_logfc,
+                                                         thresh_p_val  = pval_thresh,
+                                                         test          = "wilcox",
+                                                         name          = 'cerebro_seurat',
+                                                         only_pos      = TRUE
+                                                         )
+
+```
+
+## Perform pathway enrichment on marker genes
+
+```{r cerebro_most_expressed_genes}
+
+# Pathway analysis
+scRNAseq_Seurat_integrated_R26_cerebro <- getEnrichedPathways(object             = scRNAseq_Seurat_integrated_R26_cerebro,
+                                                              marker_genes_input = 'cerebro_seurat',
+                                                              adj_p_cutoff       = 0.01,
+                                                              max_terms          = 100
+                                                              )
+
+```
+
+## Gene set enrichment
+
+```{r cerebro_gene_set_enrichment}
+
+?performGeneSetEnrichmentAnalysis
+
+# Pathway analysis
+scRNAseq_Seurat_integrated_R26_cerebro <- performGeneSetEnrichmentAnalysis(object  = scRNAseq_Seurat_integrated_R26_cerebro,
+                                                      assay                = "RNA",
+                                                      GMT_file             = paste0(pathToData,"msigdb.v5.2.symbols_mouse.gmt"),
+                                                      groups               = groups
+                                                      )
+
+ ```
+
+
+## Export to cerebro format
+
+```{r export_to_cerebro_format}
+
+colnames(scRNAseq_Seurat_integrated_R26_cerebro@meta.data)
+
+# Export to cerebro format
+exportFromSeurat(object             = scRNAseq_Seurat_integrated_R26_cerebro,
+                 assay              = 'RNA',
+                 slot               = 'data',
+                 file               = paste0(pathToReport,'scRNAseq_Seurat_integrated_R26.crb'),
+                 experiment_name    = 'scRNAseq_R26P87',
+                 organism           = 'mm',
+                 groups             = groups,
+                 nUMI               = 'nCount_RNA',
+                 nGene              = 'nFeature_RNA',
+                 add_all_meta_data  = TRUE,
+                 verbose            = FALSE
+                 )
+
+# Copy to zerkalo
+copyToZerkalo(file       = paste0(pathToReport,'scRNAseq_Seurat_integrated_R26.crb'),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+
+## Expression of interested genes
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_integrated_R26,
+            features = "Smarcb1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "Smarcb1") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_integrated_R26_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_integrated_R26,
+        features = "Smarcb1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "Smarcb1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+## Clustering with only tumoral cells
+
+Immune and non-tumoral cells are identified by Zhi-Yan as cluster 5,6,7,9,10 (see e-mail from Zhi-Yan on jan 10 2020) and corresponding cells will be removed for the subsequent analysis
+
+### Subset cells
+
+```{r clustering}
+
+str(scRNAseq_Seurat_integrated_R26)
+
+# Subset Seurat object
+scRNAseq_Seurat_integrated_R26_tumCells <- subset(x = scRNAseq_Seurat_integrated_R26,
+                                                  integrated_snn_res.0.3 %in% c(0,1,2,3,4,8,11)
+                                                  )
+nrow(scRNAseq_Seurat_integrated_R26_tumCells)
+
+# Select cell IDs of cluster 0,1,2,3,4,8 and 11
+tumCells_IDs <- rownames(scRNAseq_Seurat_integrated_R26@meta.data[which(scRNAseq_Seurat_integrated_R26@meta.data$integrated_snn_res.0.3 %in% c(0,1,2,3,4,8,11)),])
+
+length(tumCells_IDs)
+
+length(tumCells_IDs[grepl("_1",tumCells_IDs)])
+
+length(tumCells_IDs[grepl("_2",tumCells_IDs)])
+
+length(tumCells_IDs[grepl("_3",tumCells_IDs)])
+
+head(tumCells_IDs)
+
+str(scRNAseq_Seurat_R26P87)
+
+scRNAseq_Seurat_R26P87_tumCells <- subset(scRNAseq_Seurat_R26P87,
+                                          cells = gsub(pattern = "_1",
+                                                       replacement = "",
+                                                       x = tumCells_IDs[grepl("_1",tumCells_IDs)]
+                                                       )
+                                          )
+
+scRNAseq_Seurat_R26P27_tumCells <- subset(scRNAseq_Seurat_R26P27,
+                                          cells = gsub(pattern = "_2",
+                                                       replacement = "",
+                                                       x = tumCells_IDs[grepl("_2",tumCells_IDs)]
+                                                       )
+                                          )
+
+scRNAseq_Seurat_R26P26_tumCells <- subset(scRNAseq_Seurat_R26P26,
+                                          cells = gsub(pattern = "_3",
+                                                       replacement = "",
+                                                       x = tumCells_IDs[grepl("_3",tumCells_IDs)]
+                                                       )
+                                          )
+
+```
+
+### Integrate seurat object
+
+```{r integrated_seurat_object}
+
+# Create named list of seurat object
+seurat_object_list_tumCells <- list(R26P87 = scRNAseq_Seurat_R26P87_tumCells,
+                                    R26P27 = scRNAseq_Seurat_R26P27_tumCells,
+                                    R26P26 = scRNAseq_Seurat_R26P26_tumCells
+                                    )
+
+# Find anchors
+max_dim <- 30
+scRNAseq_Seurat_anchors_tumCells <- FindIntegrationAnchors(object.list           = seurat_object_list_tumCells,
+                                                           assay                 = NULL,
+                                                           reference             = NULL,
+                                                           anchor.features       = 2000,
+                                                           scale                 = TRUE,
+                                                           normalization.method  = "LogNormalize",
+                                                           sct.clip.range        = NULL,
+                                                           reduction             = "cca",
+                                                           l2.norm               = TRUE,
+                                                           dims                  = 1:max_dim,
+                                                           k.anchor              = 5,
+                                                           k.filter              = 200,
+                                                           k.score               = 30,
+                                                           max.features          = 200,
+                                                           nn.method             = "rann",
+                                                           eps                   = 0,
+                                                           verbose               = TRUE
+                                                           )
+
+# Integrated seurat objects
+scRNAseq_Seurat_integrated_R26_tumCells <- IntegrateData(anchorset              = scRNAseq_Seurat_anchors_tumCells,
+                                                         new.assay.name         = "integrated",
+                                                         normalization.method   = "LogNormalize",
+                                                         features               = NULL,
+                                                         features.to.integrate  = NULL,
+                                                         dims                   = 1:max_dim,
+                                                         k.weight               = 100,
+                                                         weight.reduction       = NULL,
+                                                         sd.weight              = 1,
+                                                         sample.tree            = NULL,
+                                                         preserve.order         = FALSE,
+                                                         do.cpp                 = TRUE,
+                                                         eps                    = 0,
+                                                         verbose                = TRUE
+                                                         )
+
+```
+
+
+# Linear dimensional reduction
+
+```{r feature_selection}
+
+# Data scaling 
+scRNAseq_Seurat_integrated_R26_tumCells <- ScaleData(object = scRNAseq_Seurat_integrated_R26_tumCells,
+                                                     features = rownames(scRNAseq_Seurat_integrated_R26_tumCells)
+                                                     )
+
+# PCA
+scRNAseq_Seurat_integrated_R26_tumCells <- RunPCA(object = scRNAseq_Seurat_integrated_R26_tumCells)
+
+# PCs elbow plot
+PCmin <- 13
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_integrated_R26_tumCells_PCA.pdf"), width = 12, height = 12)
+ElbowPlot(object = scRNAseq_Seurat_integrated_R26_tumCells,
+          ndims = 50
+          ) +
+    geom_vline(xintercept = PCmin, lty = 2, color = "blue") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Heatmap of each PC
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_integrated_R26_tumCells_PCA.pdf"), width = 15, height = 12)
+#png(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_integrated_R26_tumCells_PCA.png"), width = 1000, height = 800)
+DimHeatmap(object = scRNAseq_Seurat_integrated_R26_tumCells,
+           dims   = 1:15,
+           ncol   = 5,
+           raster = FALSE,
+           assay  = "integrated"
+           )
+#dev.off()
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_tumCells_PCA.pdf"), width = 12, height = 12)
+DimPlot(object = scRNAseq_Seurat_integrated_R26_tumCells,
+        reduction = "pca",
+        group.by = "orig.ident"
+        ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "right"
+          )
+#dev.off()
+
+```
+
+# Linear dimensional reduction (without integration, to check integration quality)
+
+```{r linear_dimensional_reduction}
+
+scRNAseq_Seurat_integrated_R26_tumCells_RNA <- scRNAseq_Seurat_integrated_R26_tumCells
+
+DefaultAssay(scRNAseq_Seurat_integrated_R26_tumCells_RNA) <- "RNA"
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_integrated_R26_tumCells_RNA <- FindVariableFeatures(object            = scRNAseq_Seurat_integrated_R26_tumCells_RNA,
+                                                                    selection.method  = variableFeatures_method,
+                                                                    nfeatures         = nFeatures
+                                                                    )
+
+# Data scaling 
+scRNAseq_Seurat_integrated_R26_tumCells_RNA <- ScaleData(object = scRNAseq_Seurat_integrated_R26_tumCells_RNA,
+                                                         features = rownames(scRNAseq_Seurat_integrated_R26_tumCells)
+                                                         )
+
+
+# Extract matrix
+scRNAseq_Seurat_integrated_R26_tumCells_matrix_RNA <- as.matrix(GetAssayData(object = scRNAseq_Seurat_integrated_R26_tumCells_RNA,
+                                                                             slot = "scale.data"
+                                                                             )
+                                                                )
+
+head(scRNAseq_Seurat_integrated_R26_tumCells_matrix_RNA[,1:3])
+dim(scRNAseq_Seurat_integrated_R26_tumCells_matrix_RNA)
+
+# PCA analysis
+PC_RNA <- prcomp(data.frame(t(scRNAseq_Seurat_integrated_R26_tumCells_matrix_RNA)))
+
+eigVal_RNA <- get_eigenvalue(PC_RNA)
+eigValPer_RNA <- round(eigVal_RNA$variance.percent, digits = 2)
+pci_RNA <- data.frame(PC_RNA$x,scRNAseq_Seurat_integrated_R26_tumCells_RNA@meta.data)
+
+# Plot PCA and sample
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_merge_R26_tumCells_PCA.pdf"), width = 12, height = 10)
+ggplot(data = pci_RNA,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = orig.ident),
+               size    = 1
+               ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    xlab(paste0("PC1 (",eigValPer_RNA[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer_RNA[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+
+## Plot PCA and covariates
+
+```{r PCA_and_covariates}
+
+# Extract matrix
+scRNAseq_Seurat_integrated_R26_tumCells_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_integrated_R26_tumCells,
+                                                                slot = "scale.data"
+                                                                )
+                                                   )
+
+head(scRNAseq_Seurat_integrated_R26_tumCells_matrix[,1:3])
+dim(scRNAseq_Seurat_integrated_R26_tumCells_matrix)
+
+# PCA analysis
+PC        <- prcomp(data.frame(t(scRNAseq_Seurat_integrated_R26_tumCells_matrix)))
+eigVal    <- get_eigenvalue(PC)
+eigValPer <- round(eigVal$variance.percent, digits = 2)
+
+pci       <- data.frame(PC$x,scRNAseq_Seurat_integrated_R26_tumCells@meta.data)
+
+# Plot eigen value
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integrated_R26_tumCells_PCA_eigValPer.pdf"), width = 10, height = 10)
+ggplot() +
+    geom_bar(data = data.frame(PC = 1:50, eigValPer = eigValPer[1:50]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity"
+             ) +
+    geom_bar(data = data.frame(PC = 1:PCmin, eigValPer = eigValPer[1:PCmin]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity",
+             fill = "blue"
+             ) +
+    xlab(label = "\nPC") +
+    ylab(label = "% variability (eigen value)\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Plot PCA and sample
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_tumCells_PCA_sample.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = orig.ident),
+               size    = 1
+               ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of UMIs
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_tumCells_PCA_nbUMIs.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = log10(nCount_RNA)),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "log10(nb of UMIs)",
+                            type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of genes
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_tumCells_PCA_nbGenes.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = log10(nFeature_RNA)),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "log10(nb of genes)",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb RNA per gene
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_tumCells_PCA_nbRNA_per_gene.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(colour = nCount_per_Feature),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "UMIs/gene",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_tumCells_PCA_percMito.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = percent.mito),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "% mito",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and cell cycle phase
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_integrated_R26_tumCells_PCA_cellCyclePhase.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = Phase),
+               size    = 1#,
+               #pch     = 21
+               ) +
+    #scale_fill_continuous(type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+### Clustering
+
+```{r linear_dim_red}
+
+# Construct KNN graph
+scRNAseq_Seurat_integrated_R26_tumCells <- FindNeighbors(object = scRNAseq_Seurat_integrated_R26_tumCells,
+                                                         dims   = 1:PCmin
+                                                         )
+
+# Clustering by modularity optimization technique
+clustering_resolutions <- seq(from  = 0, to = 2, by = 0.1)
+scRNAseq_Seurat_integrated_R26_tumCells <- FindClusters(object     = scRNAseq_Seurat_integrated_R26_tumCells,
+                                                        resolution = clustering_resolutions
+                                                        )
+
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_integrated_R26_tumCells.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_integrated_R26_tumCells@meta.data,
+         prefix          = "integrated_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE
+         )
+#dev.off()
+
+choosenResolution <- 0.6
+
+# Set default ident
+Idents(scRNAseq_Seurat_integrated_R26_tumCells) <- scRNAseq_Seurat_integrated_R26_tumCells@meta.data[["integrated_snn_res.0.6"]]
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_integrated_R26_tumCells_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_integrated_R26_tumCells@meta.data
+       ) +
+    stat_count(mapping = aes(x     = integrated_snn_res.0.6,
+                             fill  = orig.ident
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = integrated_snn_res.0.6,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              face     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+scale_fill_manual(name = "Sample", values = c("red","green","blue")) +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+# Export meta data (for SCENIC analysis)
+head(scRNAseq_Seurat_integrated_R26_tumCells@meta.data)
+
+write.table(x      = scRNAseq_Seurat_integrated_R26_tumCells@meta.data,
+            file   = "scRNAseq_Seurat_integrated_R26_tumCells_PCmin_metaData.txt",
+            sep    = ",",
+            quote  = FALSE
+            )
+
+```
+
+## UMAP
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_integrated_R26_tumCells <- RunUMAP(object       = scRNAseq_Seurat_integrated_R26_tumCells,
+                                                   dims         = 1:PCmin,
+                                                   n.neighbors  = 30
+                                                   )
+
+# Plot UMAP and cluster
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_tumCells_clust.pdf"), width = 12, height = 10)
+DimPlot(object      = scRNAseq_Seurat_integrated_R26_tumCells,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("integrated_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(#legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# Plot UMAP and sample
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_tumCells_clust_sample.pdf"), width = 12, height = 10)
+DimPlot(object      = scRNAseq_Seurat_integrated_R26_tumCells,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "orig.ident"
+        ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_integrated_R26_tumCells,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_integrated_R26_tumCells.rds"
+                        )
+        )
+
+# Save as singleCellExperiment object
+scRNAseq_integrated_R26_sce <- as.SingleCellExperiment(x = scRNAseq_Seurat_integrated_R26_tumCells)
+
+saveRDS(object = scRNAseq_integrated_R26_sce,
+        file   = paste0("scRNAseq_integrated_R26_sce.rds"
+                        )
+        )
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+# UMAP and nb of UMIs
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_tumCells_clust_nbUMIs.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_integrated_R26_tumCells,
+            features = "nFeature_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_tumCells_clust_nbGenes.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_integrated_R26_tumCells,
+            features = "nCount_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_tumCells_clust_nbRNA_per_gene.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_integrated_R26_tumCells,
+            features = "nCount_per_Feature",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_tumCells_clust_percMito.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_integrated_R26_tumCells,
+            features = "percent.mito",
+            reduction = "umap"
+            )  +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and cell cycle phase
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_tumCells_clust_cellCyclePhase.pdf"), width = 12, height = 10)
+DimPlot(object      = scRNAseq_Seurat_integrated_R26_tumCells,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = FALSE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = c(0.9,0.9),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Boxplot of covariates per cluster
+
+```{r boxplot_and_covariates}
+
+# Boxplot and nb of UMIs
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_integrated_R26_tumCells_clust_nbUMIs.pdf"), width = 12, height = 12)
+ ggplot(data = scRNAseq_Seurat_integrated_R26_tumCells@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                              y      = log10(nCount_RNA),
+                              color  = eval(as.name(paste0("integrated_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                               y = log10(nCount_RNA)
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "log10(UMI count)\n")+
+    ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_integrated_R26_tumCells_clust_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_integrated_R26_tumCells@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                              y      = log10(nFeature_RNA),
+                              color  = eval(as.name(paste0("integrated_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                               y = log10(nFeature_RNA)
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "log10(nbGenes)\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_integrated_R26_tumCells_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_integrated_R26_tumCells@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                              y      = nCount_per_Feature,
+                              color  = eval(as.name(paste0("integrated_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                               y = nCount_per_Feature
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "UMIs per gene\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_integrated_R26_tumCells_clust_percMito.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_integrated_R26_tumCells@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                              y      = percent.mito,
+                              color  = eval(as.name(paste0("integrated_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("integrated_snn_res.",choosenResolution))),
+                               y = percent.mito
+                               ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "% mito genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.50
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+pval_thresh      <- 0.01 
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_integrated_R26_tumCells.markers <- FindAllMarkers(object            = scRNAseq_Seurat_integrated_R26_tumCells,
+                                                                  assay             = "RNA",
+                                                                  min.pct           = min_pct,
+                                                                  logfc.threshold   = min_logfc,
+                                                                  min.diff.pct      = min_diffPct,
+                                                                  only.pos          = TRUE,
+                                                                  min.cells.feature = min_cellsFeature,
+                                                                  return.thresh     = pval_thresh
+                                                                  )
+
+head(scRNAseq_Seurat_integrated_R26_tumCells.markers)
+
+# Save Seurat object as RDS
+saveRDS(object = scRNAseq_Seurat_integrated_R26_tumCells.markers,
+        file = paste0(pathToReport,"scRNAseq_Seurat_integrated_R26_tumCells.RDS")
+        )
+
+# Copy saved Seurat object to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"scRNAseq_Seurat_integrated_R26_tumCells.RDS"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_integrated_R26_tumCells_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_integrated_R26_tumCells.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10,
+              face = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_integrated_R26_tumCells.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_integrated_R26_tumCells.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_integrated_R26_tumCells_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_integrated_R26_tumCells,
+          features = scRNAseq_Seurat_integrated_R26_tumCells.markers$gene,
+          assay    = "integrated",
+          slot     = "scale.data"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_integrated_R26_tumCells_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_integrated_R26_tumCells,
+          features = nTop_markers$gene,
+          assay    = "integrated",
+          slot     = "scale.data"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=15))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_integrated_R26_tumCells_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 20
+scRNAseq_Seurat_integrated_R26_tumCells.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_integrated_R26_tumCells.markers,
+            file        = paste0(pathToReport,"scRNAseq_integrated_R26_tumCells_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+# Copy table to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"scRNAseq_integrated_R26_tumCells_cluster_geneMarkers.txt"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+## Expression of interested genes
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_tumCells_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_integrated_R26_tumCells,
+            features = "Smarcb1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "Smarcb1") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_integrated_R26_tumCells_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_integrated_R26_tumCells,
+        features = "Smarcb1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "Smarcb1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+# Cerebro analysis (for visualization purpose)
+
+## Copy seurat object
+
+```{r export_to_cerebro_format}
+
+scRNAseq_Seurat_integrated_R26_tumCells_cerebro <- scRNAseq_Seurat_integrated_R26_tumCells
+scRNAseq_Seurat_integrated_R26_tumCells_cerebro
+
+head(scRNAseq_Seurat_integrated_R26_tumCells_cerebro@meta.data)
+
+```
+
+## Clusters relationship trees
+
+```{r export_to_cerebro_format}
+
+# Create vectors of clustering resolutions
+groups <- paste0('integrated_snn_res.',clustering_resolutions)
+groups <- c(groups,'seurat_clusters','orig.ident')
+
+# Build phylogenetic tree for clusters
+for (res in groups[-1])
+{
+    print(res)
+    Idents(scRNAseq_Seurat_integrated_R26_tumCells_cerebro) <- res
+    scRNAseq_Seurat_integrated_R26_tumCells_cerebro <- BuildClusterTree(object           = scRNAseq_Seurat_integrated_R26_tumCells_cerebro,
+                                                               dims             = 1:PCmin,
+                                                               reorder          = FALSE,
+                                                               reorder.numeric  = FALSE
+                                                               )
+    scRNAseq_Seurat_integrated_R26_tumCells_cerebro@misc$trees[[res]] <- scRNAseq_Seurat_integrated_R26_tumCells_cerebro@tools$BuildClusterTree
+}
+
+```
+
+## Compute percentage of mitochondrial and ribosomal transcripts
+
+```{r cerebro_mito_ribo}
+
+# % of mito and ribo 
+scRNAseq_Seurat_integrated_R26_tumCells_cerebro <- addPercentMtRibo(object             = scRNAseq_Seurat_integrated_R26_tumCells_cerebro,
+                                                                    organism           = 'mm',
+                                                                    gene_nomenclature  = 'name'
+                                                                    )
+
+```
+
+## Get most expressed genes
+
+```{r cerebro_most_expressed_genes}
+
+# Most expressed genes
+scRNAseq_Seurat_integrated_R26_tumCells_cerebro <- getMostExpressedGenes(object  = scRNAseq_Seurat_integrated_R26_tumCells_cerebro,
+                                                                         assay   = 'RNA',
+                                                                         groups  = groups
+                                                                         )
+
+```
+
+## Get marker genes
+
+```{r cerebro_marker_genes}
+
+min_pct <- 0.1
+min_logfc <- 0.25
+pval_thresh <- 0.05
+
+# Mark genes
+scRNAseq_Seurat_integrated_R26_tumCells_cerebro <- getMarkerGenes(object        = scRNAseq_Seurat_integrated_R26_tumCells_cerebro,
+                                                                  assay         = 'RNA',
+                                                                  organism      = 'mm',
+                                                                  groups        = groups,
+                                                                  min_pct       = min_pct,
+                                                                  thresh_logFC  = min_logfc,
+                                                                  thresh_p_val  = pval_thresh,
+                                                                  test          = "wilcox",
+                                                                  name          = 'R26_integrated_tumCells',
+                                                                  only_pos      = TRUE
+                                                                  )
+
+```
+
+## Perform pathway enrichment on marker genes
+
+```{r cerebro_most_expressed_genes}
+
+# Pathway analysis
+scRNAseq_Seurat_integrated_R26_tumCells_cerebro <- getEnrichedPathways(object             = scRNAseq_Seurat_integrated_R26_tumCells_cerebro,
+                                                                       marker_genes_input = 'R26_integrated_tumCells',
+                                                                       adj_p_cutoff       = 0.01,
+                                                                       max_terms          = 100
+                                                                       )
+
+```
+
+## Gene set enrichment
+
+```{r cerebro_gene_set_enrichment}
+
+
+# Pathway analysis
+scRNAseq_Seurat_integrated_R26_tumCells_cerebro <- performGeneSetEnrichmentAnalysis(object  = scRNAseq_Seurat_integrated_R26_tumCells_cerebro,
+                                                      assay                = "RNA",
+                                                      GMT_file             = paste0(pathToData,"msigdb.v5.2.symbols_mouse.gmt"),
+                                                      groups               = groups
+                                                      )
+
+```
+
+
+## Export to cerebro format
+  
+```{r export_to_cerebro_format}
+
+colnames(scRNAseq_Seurat_integrated_R26_tumCells_cerebro@meta.data)
+
+# Export to cerebro format
+exportFromSeurat(object             = scRNAseq_Seurat_integrated_R26_tumCells_cerebro,
+                 assay              = 'RNA',
+                 slot               = 'data',
+                 file               = paste0(pathToReport,'scRNAseq_Seurat_integrated_R26_tumCells.crb'),
+                 experiment_name    = 'scRNAseq_R26P87',
+                 organism           = 'mm',
+                 groups             = groups,
+                 nUMI               = 'nCount_RNA',
+                 nGene              = 'nFeature_RNA',
+                 add_all_meta_data  = TRUE,
+                 verbose            = FALSE
+                 )
+
+# Copy to zerkalo
+copyToZerkalo(file       = paste0(pathToReport,'scRNAseq_Seurat_integrated_R26_tumCells.crb'),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+
+
+## Expression of interested genes
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_integrated_R26_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_integrated_R26_tumCells,
+            features = "Smarcb1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "Smarcb1") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_integrated_R26_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_integrated_R26_tumCells,
+        features = "Smarcb1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "Smarcb1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+### Supplementary Fig 12new (LobonIglesias2022)
+
+```{r figure8bis_patchwork}
+
+paperFig_fontsize <- 6
+
+######################
+# nb Genes filtering #
+######################
+
+# Import individual raw data sample meta data
+R26P26_metadata <- read.table(file = "scRNAseq_Seurat_R26P26_metadata.txt",
+                              sep = ",",
+                              header = TRUE
+                              )
+head(R26P26_metadata)
+#
+R26P27_metadata <- read.table(file = "scRNAseq_Seurat_R26P27_metadata.txt",
+                              sep = ",",
+                              header = TRUE
+                              )
+head(R26P27_metadata)
+#
+R26P87_metadata <- read.table(file = "scRNAseq_Seurat_R26P87_metadata.txt",
+                              sep = ",",
+                              header = TRUE
+                              )
+head(R26P87_metadata)
+
+# Function to plot nbUM vs nbGenes
+plot_nbUMI_nbGenes_func <- function(metadata, min_nFeature, title)
+    {
+        p <- ggplot() +
+            geom_point(data = filter(.data = metadata,
+                                     nFeature_RNA >= min_nFeature
+                                     ),
+                       mapping = aes(x = nCount_RNA,
+                                     y = nFeature_RNA
+                                     ),
+                       size = 0.1,
+                       pch = 21,
+                       color = "darkgreen"
+                       ) +
+            ggtitle(title) +
+            geom_point(data = filter(.data = metadata,
+                                     nFeature_RNA < min_nFeature
+                                     ),
+                       mapping = aes(x = nCount_RNA,
+                                     y = nFeature_RNA
+                                     ),
+                       size = 0.1,
+                       pch = 21,
+                       color = "grey"
+                       ) +
+            xlab(label = "\nRNA count (UMI)") +
+            ylab(label = "nb of genes\n") +
+            ylim(0,10000) +
+            theme_bw() +
+            geom_hline(yintercept = min_nFeature,
+                       color = "red",
+                       lty = 2,
+                       lwd = 0.25
+                       ) +
+            theme(axis.text = element_text(size = paperFig_fontsize),
+                  axis.title = element_text(size = paperFig_fontsize, face = "bold"),
+                  plot.title = element_text(size = paperFig_fontsize*1.5, face = "bold")
+                  ) +
+            geom_text(mapping = aes(x = (max(metadata$nCount_RNA) - min(metadata$nCount_RNA))/2,
+                                    y = min_nFeature
+                                    ),
+                      label = min_nFeature,
+                      color = "red",
+                      size = paperFig_fontsize/3,
+                      nudge_y = max(metadata$nFeature_RNA)/20
+                      )
+        # Add marginal density
+        p <- ggMarginal(p        = p,
+                        type     = "density",
+                        margins  = "both",
+                        xparams  = list(fill = "yellow"),
+                        yparams  = list(fill = "blue")
+                        )
+        return(p)
+    }
+
+# Plot nbUMI vs nbGenes for individual samples
+R26P26_nbUMI_nbGenes <- plot_nbUMI_nbGenes_func(R26P26_metadata, 384, title = "R26P26")
+R26P27_nbUMI_nbGenes <- plot_nbUMI_nbGenes_func(R26P27_metadata, 407, title = "R26P27")
+R26P87_nbUMI_nbGenes <- plot_nbUMI_nbGenes_func(R26P87_metadata, 367, title = "R26P87")
+
+# Export table for source data
+write.csv(x = R26P26_metadata[,c("nCount_RNA","nFeature_RNA")],
+          file = "../LobonIglesias_sourceData/SuppFig12_A_R26P26.csv",
+          row.names = TRUE
+          )
+
+# Export table for source data
+write.csv(x = R26P27_metadata[,c("nCount_RNA","nFeature_RNA")],
+          file = "../LobonIglesias_sourceData/SuppFig12_A_R26P27.csv",
+          row.names = TRUE
+          )
+
+# Export table for source data
+write.csv(x = R26P87_metadata[,c("nCount_RNA","nFeature_RNA")],
+          file = "../LobonIglesias_sourceData/SuppFig12_A_R26P87.csv",
+          row.names = TRUE
+          )
+
+SuppFig9_A <- wrap_plots(wrap_elements(R26P26_nbUMI_nbGenes) + labs(tag='A'),
+                         wrap_elements(R26P27_nbUMI_nbGenes),
+                         wrap_elements(R26P87_nbUMI_nbGenes),
+                         widths = c(0.333,0.333,0.333)
+                         )
+
+
+####################
+# Mito % filtering #
+####################
+
+# Import individual raw data sample meta data
+R26P26_nbGenes_metadata <- read.table(file = "scRNAseq_Seurat_R26P26_nbGenes_metadata.txt",
+                              sep = ",",
+                              header = TRUE
+                              )
+head(R26P26_nbGenes_metadata)
+#
+R26P27_nbGenes_metadata <- read.table(file = "scRNAseq_Seurat_R26P27_nbGenes_metadata.txt",
+                                      sep = ",",
+                                      header = TRUE
+                                      )
+head(R26P27_metadata)
+#
+R26P87_nbGenes_metadata <- read.table(file = "scRNAseq_Seurat_R26P87_nbGenes_metadata.txt",
+                              sep = ",",
+                              header = TRUE
+                              )
+head(R26P87_metadata)
+
+plot_nbUMI_percMito_func <- function(metadata, max_percOfMitoGenes)
+{
+    p <- ggplot() +
+        geom_point(data = metadata,
+                   mapping = aes(x = nCount_RNA,
+                                 y = percent.mito
+                                 ),
+                   size = 0.1,
+                   pch = 21,
+                   color = "grey"
+                   ) +
+        geom_point(data = filter(.data = metadata,
+                                 percent.mito < max_percOfMitoGenes
+                                 ),
+                   mapping = aes(x = nCount_RNA,
+                                 y = percent.mito
+                                 ),
+                   size = 0.1,
+                   pch = 21,
+                   color = "blue"
+                   ) +
+        ylim(0,65) +
+        xlab(label = "\nnb of RNA (UMI count)") +
+        ylab(label = "\n% mito. genes\n") +
+        geom_hline(yintercept = max_percOfMitoGenes,
+                   color = "red",
+                   lty = 2
+                   ) +
+        theme_bw() +
+        theme(axis.text = element_text(size = paperFig_fontsize),
+              axis.title = element_text(size = paperFig_fontsize,
+                                        face = "bold"
+                                        )
+              ) +
+        geom_text(mapping = aes(x = (max(metadata$nCount_RNA) - min(metadata$nCount_RNA))/2,
+                                y = max_percOfMitoGenes
+                                ),
+                  label = paste0(max_percOfMitoGenes," %"),
+                  color = "red",
+                  size = paperFig_fontsize/3,
+                  nudge_y = 2
+                  )
+    p <- ggMarginal(p        = p,
+                    type     = "density",
+                    margins  = "y",
+                    fill     = "violet"
+                    )
+}
+
+# Plot nbUMI vs %Mito for individual samples
+R26P26_nbUMI_percMito <- plot_nbUMI_percMito_func(R26P26_nbGenes_metadata, 10)
+R26P27_nbUMI_percMito <- plot_nbUMI_percMito_func(R26P27_nbGenes_metadata, 15)
+R26P87_nbUMI_percMito <- plot_nbUMI_percMito_func(R26P87_nbGenes_metadata, 15)
+
+head(R26P26_nbGenes_metadata)
+
+# Export table for source data
+write.csv(x = R26P26_nbGenes_metadata[,c("nCount_RNA","percent.mito")],
+          file = "../LobonIglesias_sourceData/SuppFig12_B_R26P26.csv",
+          row.names = TRUE
+          )
+
+# Export table for source data
+write.csv(x = R26P27_nbGenes_metadata[,c("nCount_RNA","percent.mito")],
+          file = "../LobonIglesias_sourceData/SuppFig12_B_R26P27.csv",
+          row.names = TRUE
+          )
+
+# Export table for source data
+write.csv(x = R26P87_nbGenes_metadata[,c("nCount_RNA","percent.mito")],
+          file = "../LobonIglesias_sourceData/SuppFig12_B_R26P87.csv",
+          row.names = TRUE
+          )
+
+SuppFig9_B <- wrap_plots(wrap_elements(R26P26_nbUMI_percMito) + labs(tag='B'),
+                         wrap_elements(R26P27_nbUMI_percMito),
+                         wrap_elements(R26P87_nbUMI_percMito),
+                         widths = c(0.333,0.333,0.333)
+                         )
+
+#########################################
+# nb of cells after each filtering step #
+#########################################
+
+R26P26_nbOfCells <- data.frame(filtering = c("no filt.","nb Genes filt.","% mito filt."),
+                               nbOfCells = c(nrow(R26P26_metadata),nrow(R26P26_nbGenes_metadata),nrow(filter(R26P26_nbGenes_metadata,percent.mito < 5))),
+                               check.names = FALSE
+                               )
+#
+R26P27_nbOfCells <- data.frame(filtering = c("no filt.","nb Genes filt.","% mito filt."),
+                               nbOfCells = c(nrow(R26P27_metadata),nrow(R26P27_nbGenes_metadata),nrow(filter(R26P27_nbGenes_metadata,percent.mito < 5))),
+                               check.names = FALSE
+                               )
+#
+R26P87_nbOfCells <- data.frame(filtering = c("no filt.","nb Genes filt.","% mito filt."),
+                               nbOfCells = c(nrow(R26P87_metadata),nrow(R26P87_nbGenes_metadata),nrow(filter(R26P87_nbGenes_metadata,percent.mito < 5))),
+                               check.names = FALSE
+                               )
+
+plot_nbOfCells_func <- function(table)
+{
+    table$filtering <- factor(table$filtering, levels = c("no filt.","nb Genes filt.","% mito filt."))
+    ggplot(data = table,
+           mapping = aes(x = filtering,
+                         y = nbOfCells,
+                         fill = filtering
+                         ),
+           ) +
+        geom_bar(stat = "identity"
+                 ) +
+        ylim(0,15000) +
+        scale_fill_manual(values = c("black","darkgreen", "green")) +
+        xlab(label = "\nfiltering step") +
+        ylab(label = "nb of cells\n") +
+        geom_text(aes(label = nbOfCells), size = paperFig_fontsize/2.5, fontface = "bold", vjust = -0.25) +
+        theme_bw() +
+        theme(axis.text = element_text(size = paperFig_fontsize),
+              axis.title = element_text(size = paperFig_fontsize, face = "bold"),
+              legend.position = "none"
+              )
+}
+
+barplot_nbOfCells_R26P26 <- plot_nbOfCells_func(R26P26_nbOfCells)
+barplot_nbOfCells_R26P27 <- plot_nbOfCells_func(R26P27_nbOfCells)
+barplot_nbOfCells_R26P87 <- plot_nbOfCells_func(R26P87_nbOfCells)
+
+head(R26P26_nbOfCells)
+
+# Export table for source data
+write.csv(x = R26P26_nbOfCells,
+          file = "../LobonIglesias_sourceData/SuppFig12_C_R26P26.csv",
+          row.names = FALSE
+          )
+
+# Export table for source data
+write.csv(x = R26P27_nbOfCells,
+          file = "../LobonIglesias_sourceData/SuppFig12_C_R26P27.csv",
+          row.names = FALSE
+          )
+
+# Export table for source data
+write.csv(x = R26P87_nbOfCells,
+          file = "../LobonIglesias_sourceData/SuppFig12_C_R26P87.csv",
+          row.names = FALSE
+          )
+
+SuppFig9_C <- wrap_plots(wrap_elements(barplot_nbOfCells_R26P26) + labs(tag='C'),
+                         wrap_elements(barplot_nbOfCells_R26P27),
+                         wrap_elements(barplot_nbOfCells_R26P87),
+                         widths = c(0.333,0.333,0.333)
+                         )
+
+##########################################
+# PCA of merged (not integrated) samples #
+##########################################
+
+seurat_object_list <- list(R26P26 = scRNAseq_Seurat_R26P26,
+                           R26P27 = scRNAseq_Seurat_R26P27,
+                           R26P87 = scRNAseq_Seurat_R26P87
+                           )
+
+# Rename cells using object name as prefix
+for (obj in names(seurat_object_list))
+{
+    seurat_object_list[[obj]] <- RenameCells(object = seurat_object_list[[obj]],
+                                             add.cell.id = obj
+                                             )
+}
+
+# Merge seurat objects
+#scRNAseq_Seurat_merge <- reduce(.x         = seurat_object_list,
+ #                               .f         = merge,
+  #                              merge.data = FALSE
+   #                             )
+
+scRNAseq_Seurat_merge <- merge(merge(seurat_object_list[["R26P26"]],
+                                     seurat_object_list[["R26P27"]],
+                                     merge.data = FALSE
+                                     ),
+                               seurat_object_list[["R26P87"]],
+                               merge.data = FALSE
+                               )
+
+# Normalization
+scRNAseq_Seurat_merge <- NormalizeData(object                = scRNAseq_Seurat_merge,
+                                       normalization.method  = "LogNormalize",
+                                       scale.factor          = 10000
+                                       )
+
+# Compute cell cycle scoring  
+scRNAseq_Seurat_merge <- CellCycleScoring(object        = scRNAseq_Seurat_merge,
+                                          s.features    = str_to_sentence(cc.genes$s.genes),
+                                          g2m.features  = str_to_sentence(cc.genes$g2m.genes)
+                                          )
+
+
+# Highly variable genes
+scRNAseq_Seurat_merge <- FindVariableFeatures(object            = scRNAseq_Seurat_merge,
+                                              selection.method  = variableFeatures_method,
+                                              nfeatures         = nFeatures
+                                              )
+
+# Data scaling 
+scRNAseq_Seurat_merge <- ScaleData(object = scRNAseq_Seurat_merge#,
+                                   #features = rownames(scRNAseq_Seurat_merge)
+                                   )
+
+# Extract matrix
+scRNAseq_Seurat_merge_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_merge,
+                                                       slot = "scale.data"
+                                                       )
+                                          )
+
+# PCA analysis
+scRNAseq_Seurat_merge_PC        <- prcomp(data.frame(t(scRNAseq_Seurat_merge_matrix)))
+scRNAseq_Seurat_merge_eigVal    <- get_eigenvalue(scRNAseq_Seurat_merge_PC)
+scRNAseq_Seurat_merge_eigValPer <- round(scRNAseq_Seurat_merge_eigVal$variance.percent, digits = 2)
+scRNAseq_Seurat_merge_pci       <- data.frame(scRNAseq_Seurat_merge_PC$x,scRNAseq_Seurat_merge@meta.data)
+
+plot_pca_func <- function(pci,eigValPer,covariate,cols,name)
+{
+    ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = !!enquo(covariate)),
+               size    = 0.25
+               ) +
+    scale_colour_manual(name = name, values = cols) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    #ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = paperFig_fontsize),
+          legend.title      = element_text(face = "bold"),
+          legend.key.height = unit(0.5,"cm")
+          )
+}
+
+scRNAseq_Seurat_merge_PCA_orig.ident <- plot_pca_func(scRNAseq_Seurat_merge_pci,
+                                                      scRNAseq_Seurat_merge_eigValPer,
+                                                      orig.ident,c("red","green","blue"),
+                                                      "Sample"
+                                                      )
+scRNAseq_Seurat_merge_PCA_Phase <- plot_pca_func(scRNAseq_Seurat_merge_pci,
+                                                 scRNAseq_Seurat_merge_eigValPer,
+                                                 Phase,
+                                                 c("grey","brown","yellow"),
+                                                 "Phase"
+                                                 )
+
+# Export table for source data
+write.csv(x = scRNAseq_Seurat_merge_pci[,c("PC1","PC2","orig.ident","Phase")],
+          file = "../LobonIglesias_sourceData/SuppFig12_D_topRight_bottomRight.csv",
+          row.names = TRUE
+          )
+
+scRNAseq_Seurat_integrated_eigValPer <- eigValPer
+scRNAseq_Seurat_integrated_pci <- pci
+
+scRNAseq_Seurat_integrated_PCA_orig.ident <- plot_pca_func(scRNAseq_Seurat_integrated_pci,
+                                                           scRNAseq_Seurat_merge_eigValPer,
+                                                           orig.ident,c("red","green","blue"),
+                                                           "Sample"
+                                                           )
+scRNAseq_Seurat_integrated_PCA_Phase <- plot_pca_func(scRNAseq_Seurat_integrated_pci,
+                                                      scRNAseq_Seurat_merge_eigValPer,
+                                                      Phase,
+                                                      c("grey","brown","yellow"),
+                                                      "Phase"
+                                                      )
+
+# Export table for source data
+write.csv(x = scRNAseq_Seurat_integrated_pci[,c("PC1","PC2","orig.ident","Phase")],
+          file = "../LobonIglesias_sourceData/SuppFig12_D_topLeft_bottomLeft.csv",
+          row.names = TRUE
+          )
+
+SuppFig9_D <- wrap_plots(wrap_elements(scRNAseq_Seurat_merge_PCA_orig.ident) + labs(tag='D'),
+                         wrap_elements(scRNAseq_Seurat_integrated_PCA_orig.ident),
+                         wrap_elements(scRNAseq_Seurat_merge_PCA_Phase),
+                         wrap_elements(scRNAseq_Seurat_integrated_PCA_Phase)
+                         ) +
+    plot_layout(nrow = 2)
+
+# Patchwork
+SuppFig9 <- wrap_plots(SuppFig9_A,
+                       SuppFig9_B,
+                       SuppFig9_C,
+                       SuppFig9_D,
+                       heights = c(0.25,0.2,0.15,0.4)
+                       ) &
+    theme(text = element_text(face = 'bold',size = 9),
+          plot.tag = element_text(size = 20, face = 'bold')
+          ) &
+    plot_annotation(title = "Supplementary Fig. 12\n",
+                    theme = theme(plot.margin = unit(c(1,2,2,1),'cm'),
+                                  text = element_text(size = 20)
+                                  )
+                    )
+
+# Save figure into pdf file
+ggsave(plot   = SuppFig9,
+       file   = paste0(pathToFigures,"SuppFig12new_LobonIglesias2022.pdf"),
+       width  = 210, #full a4 210
+       height = 297, # full a4 297
+       units  = "mm"
+       )
+
+# Copy to Zerkalo
+copyToZerkalo(file = paste0(pathToFigures,"SuppFig12new_LobonIglesias2022.pdf"),
+              zerkaloDir = "mandrian_cellOrigin_ATRT"
+              )
+
+```
+
+### Supplementary Fig 10 (LobonIglesias2022)
+
+```{r figure8bis_patchwork}
+
+#########################
+# UMAP and marker genes #
+#########################
+
+DefaultAssay(scRNAseq_Seurat_integrated_R26_plus) <- "RNA"
+
+SuppFig10_A <- FeaturePlot(object   = scRNAseq_Seurat_integrated_R26_plus,
+                           features = "Ptprc",
+                           pt.size     = 0.1,
+                           cols = c("grey","yellow","red","darkred")
+                           ) &
+    theme(text = element_text(size = paperFig_fontsize)
+          )
+
+SuppFig10_B <- FeaturePlot(object   = scRNAseq_Seurat_integrated_R26_plus,
+                           features = "Epcam",
+                           pt.size     = 0.1,
+                           cols = c("grey","yellow","red","darkred")
+                           ) &
+    theme(text = element_text(size = paperFig_fontsize)
+          )
+
+SuppFig10_C <- FeaturePlot(object   = scRNAseq_Seurat_integrated_R26_plus,
+                           features = "Smarcb1",
+                           pt.size     = 0.1,
+                           cols = c("grey","yellow","red","darkred")
+                           ) &
+    theme(text = element_text(size = paperFig_fontsize)
+          )
+
+#######################################################
+# UMAP and clustering tumor cells and non-tumor cells #
+#######################################################
+
+scRNAseq_Seurat_integrated_R26_plus <- scRNAseq_Seurat_integrated_R26
+
+scRNAseq_Seurat_integrated_R26_plus@meta.data <- mutate(scRNAseq_Seurat_integrated_R26_plus@meta.data,
+                                                        cell_assign = case_when(integrated_snn_res.0.3 %in% c(5,6) ~ "immune cells",
+                                                                                integrated_snn_res.0.3 %in% c(7,9,10) ~ "non-tumoral cells",
+                                                                                TRUE ~ "tumoral cells"
+                                                                                )
+                                                        )
+
+umap_scRNAseq_Seurat_integrated_R26_cluster <- DimPlot(object      = scRNAseq_Seurat_integrated_R26_plus,
+                                                       reduction   = "umap",
+                                                       pt.size     = 0.1,
+                                                       group.by    = "cell_assign",
+                                                       label       = FALSE,
+                                                       label.size  = paperFig_fontsize/3
+                                                       ) &
+    theme(text = element_text(size = paperFig_fontsize)
+          )
+
+SuppFig10_D <- wrap_plots(umap_scRNAseq_Seurat_integrated_R26_cluster)
+
+SuppFig10 <- wrap_plots(SuppFig10_A,
+                        SuppFig10_B,
+                        SuppFig10_C,
+                        SuppFig10_D
+                        )
+
+# Export table for sourc data
+write.csv(x = cbind(cbind(scRNAseq_Seurat_integrated_R26_plus@reductions$umap@cell.embeddings,
+                    t(as.matrix(scRNAseq_Seurat_integrated_R26_plus@assays$RNA@data[c("Ptprc","Epcam","Smarcb1"),]
+                                )
+                      )
+                    ),
+                    scRNAseq_Seurat_integrated_R26_plus@meta.data["cell_assign"]
+                    ),
+          file = "../LobonIglesias_sourceData/SuppFig13_ABCD.csv",
+          row.names = TRUE
+          )
+
+# Patchwork
+SuppFig10 <- wrap_plots(SuppFig10,
+                        plot_spacer(),
+                        heights =c(0.5,0.5)
+                       ) &
+    theme(text = element_text(face = 'bold',size = 9),
+          plot.tag = element_text(size = 20, face = 'bold')
+          ) &
+    plot_annotation(title = "Supplementary Fig. 13\n",
+                    tag_levels = 'A',
+                    theme = theme(plot.margin = unit(c(1,2,2,1),'cm'),
+                                  text = element_text(size = 15)
+                                  )
+                    )
+
+# Save figure into pdf file
+ggsave(plot   = SuppFig10,
+       file   = paste0(pathToFigures,"SuppFig13new_LobonIglesias2022.pdf"),
+       width  = 210, #full a4 210
+       height = 297, # full a4 297
+       units  = "mm"
+       )
+
+# Copy to Zerkalo
+copyToZerkalo(file = paste0(pathToFigures,"SuppFig10_LobonIglesias2022.pdf"),
+              zerkaloDir = "mandrian_cellOrigin_ATRT"
+              )
+
+```
+
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

@@ -1,0 +1,54 @@
+
+# Import and explore cell types database
+
+```{r import_CellTypeMarkers_database}
+
+# Import cannonical and published cell type markers
+cellType_markers <- read.table(file    = "~/.../.../cellType_markers.csv",
+                               header  = TRUE,
+                               sep     = "\t"
+                               )
+head(cellType_markers)
+
+```
+	
+# Select immune markers
+	
+```{r select_immune_markers}
+
+# Select immune cells canonical markers
+immuneMarkers <- filter(.data     = cellType_markers,
+                        Source    == "canonical marker",
+                        Group     == "immune cells",
+                        Organism  == "human"
+                        )
+
+# Check genes 
+as.vector(immuneMarkers$Gene)
+
+```
+
+# Visualize expression of particular gene(s) in UMAP
+
+```{r gene_expression_UMAP}
+
+# Plot gene expression in UMAP
+FeaturePlot(object   = seuratObject,
+            features = as.vector(immuneMarkers$Gene),
+            pt.size  = 0.25
+            )
+
+```
+
+# Visualize expression of particular gene(s) in violin plot
+
+```{r gene_exression_violinPlot}
+
+# Plot gene expression in UMAP
+VlnPlot(object    = seuratObject,
+        features  = as.vector(immuneMarkers$Gene),
+        pt.size   = 0
+        )
+
+```
+

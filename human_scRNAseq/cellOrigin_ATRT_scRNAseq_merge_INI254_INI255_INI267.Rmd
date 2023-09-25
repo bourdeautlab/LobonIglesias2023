@@ -1,0 +1,1604 @@
+---
+title: "Human ATRT RNAseq data"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "cellOrigin_ATRT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+pathToRNApip_RESULT          <- paste0(pathToThisProject,"RNApip_RESULT/")
+pathToFeatureCounts          <- paste0(pathToThisProject,"FeatureCounts_RESULT/")
+
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("cellOrigin_ATRT_scRNAseq_merge_INI254_INI255_INI267.RData")
+
+#save.image(file="cellOrigin_ATRT_scRNAseq_merge_INI254_INI255_INI267.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+
+```
+
+```{r delete_all_objects}
+
+# Delete all objects
+#rm(list = ls())
+
+```
+
+# Load data and create Seurat object
+
+## INI254
+
+```{r load_data}
+
+pathTo_INI254_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/INI254/count/INI254_count_aggr/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+INI254_data <- Read10X(data.dir         = pathTo_INI254_cellRangerCount,
+                       gene.column      = 2,
+                       unique.features  = TRUE
+                       )
+
+# Create Seurat object
+scRNAseq_Seurat_INI254 <- CreateSeuratObject(counts   = INI254_data,
+                                             project  = "INI254"
+                                             )
+```
+
+## INI255
+
+```{r load_data}
+
+pathTo_INI255_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/INI255/count/INI255_count_aggr/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+INI255_data <- Read10X(data.dir         = pathTo_INI255_cellRangerCount,
+                       gene.column      = 2,
+                       unique.features  = TRUE
+                       )
+
+# Create Seurat object
+scRNAseq_Seurat_INI255 <- CreateSeuratObject(counts   = INI255_data,
+                                             project  = "INI255"
+                                             )
+```
+
+## INI267
+
+```{r load_data}
+
+pathTo_INI267_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/INI267/count/INI267_2008306_count/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+INI267_data <- Read10X(data.dir         = pathTo_INI267_cellRangerCount,
+                       gene.column      = 2,
+                       unique.features  = TRUE
+                       )
+
+# Create Seurat object
+scRNAseq_Seurat_INI267 <- CreateSeuratObject(counts   = INI267_data,
+                                             project  = "INI267"
+                                             )
+```
+
+# Merge seurat object
+
+```{r merge_seurat_object}
+
+# Create named list of seurat object
+seurat_object_list <- list(INI254 = scRNAseq_Seurat_INI254,
+                           INI255 = scRNAseq_Seurat_INI255,
+                           INI267 = scRNAseq_Seurat_INI267
+                           )
+
+# Rename cells using object name as prefix
+for (obj in names(seurat_object_list))
+{
+    seurat_object_list[[obj]] <- RenameCells(object = seurat_object_list[[obj]],
+                                             add.cell.id = obj
+                                             )
+}
+
+
+# Merge seurat objects
+scRNAseq_Seurat_merge <- reduce(.x         = seurat_object_list,
+                                .f         = merge,
+                                merge.data = FALSE
+                                )
+
+```
+
+## Cell QC and filtering
+
+```{r create_table_of_nbOfCell_after_filtering}
+
+# Create data frame
+cellFiltering <- data.frame(filtering = "no filtering",
+                            nbOfCells = nrow(scRNAseq_Seurat_merge@meta.data)
+                            )
+
+cellFiltering
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_cellFiltering.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering,
+       mapping = aes(x = filtering,
+                     y = nbOfCells
+                     ),
+             ) +
+    geom_bar(stat = "identity",
+             fill = "black"
+             ) +
+    ylim(0,20000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Number of genes and number of RNA (UMIs)
+
+```{r number_of_genes_per_cell}
+
+head(scRNAseq_Seurat_merge@meta.data)
+
+# Set minimum number of genes
+min_nFeature <- round(quantile(scRNAseq_Seurat_merge@meta.data$nFeature_RNA,
+         probs = 0.05
+         ))
+min_nFeature
+
+# Density distribution of total RNA count
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_merge_nbRNA.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_merge@meta.data) +
+    geom_histogram(mapping = aes(x = nCount_RNA),
+                   fill = "yellow",
+                   color = "black",
+                   binwidth = 1000
+                   ) +
+    xlab(label = "\nnb of RNA (UMI)") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Density distribution of detected genes
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_merge_nbGenes.pdf"), width = 12, height = 12)
+ggplot() +
+    geom_histogram(data = filter(scRNAseq_Seurat_merge@meta.data, nFeature_RNA >= 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "blue",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    geom_histogram(data = filter(scRNAseq_Seurat_merge@meta.data, nFeature_RNA < 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "grey",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    xlab(label = "\nnb of genes") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Scatter plot nCount_RNA and nFeature_RNA
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_merge@meta.data,
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA,
+                             color = orig.ident
+                             ),
+               pch = 21,
+               alpha = 0.25
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_merge@meta.data,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA,
+                             color = orig.ident
+                             ),
+               pch = 21
+               ) +
+    xlab(label = "\nRNA count (UMI)") +
+    ylab(label = "nb of genes\n") +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+theme_bw() +
+geom_hline(yintercept = min_nFeature,
+           color = "red",
+           lty = 2
+           ) +
+    theme(text = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = c(0.1,0.875)
+          )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_merge_nbRNA_vs_nbGene.pdf"), width = 14, height = 10)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "yellow"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Number of gene filtering
+scRNAseq_Seurat_merge_nbGenes <- subset(x = scRNAseq_Seurat_merge,
+                                        subset = nFeature_RNA > min_nFeature
+                                        )
+
+# Append cell filtering table
+cellFiltering_nbGenes <- rbind(cellFiltering,
+                               data.frame(filtering = "nb genes",
+                                          nbOfCells = nrow(scRNAseq_Seurat_merge_nbGenes@meta.data)
+                                          )
+                               )
+
+cellFiltering_nbGenes
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_cellFiltering_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering_nbGenes,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,20000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_fill_manual(values = c("black","darkgreen")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Mitochondrial genes
+
+```{r QC_filtering}
+
+# Import mitochondrial gene info
+pathToMitoGenes <- paste0(pathToData,"/mitochondrialRNA/group-1974.csv")
+
+mitoGenes <- read.table(file         = pathToMitoGenes,
+                        skip         = 1,
+                        header       = TRUE,
+                        quote        = '"',
+                        sep          = ",",
+                        check.names  = FALSE
+                        )
+
+head(mitoGenes)
+
+# Mitocondrial genes percentage
+scRNAseq_Seurat_merge_nbGenes[["percent.mito"]] <- PercentageFeatureSet(object   = scRNAseq_Seurat_merge_nbGenes,
+                                                                         features = as.vector(as.character(mitoGenes$`Approved symbol`)),
+                                                                         assay = "RNA"
+                                                              )
+
+head(scRNAseq_Seurat_merge_nbGenes@meta.data)
+
+# Set percentage of count falling in mitochondrial genes
+max_percOfMitoGenes <- 10
+
+# Scatter plot
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_merge_nbGenes@meta.data,
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito,
+                             colour = orig.ident
+                             ),
+               pch = 21,
+               alpha = 0.25
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_merge_nbGenes@meta.data,
+                             percent.mito < max_percOfMitoGenes
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito,
+                             color = orig.ident
+                             ),
+               pch = 21
+               ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    xlab(label = "\nnb of RNA (UMI count)") +
+ylab(label = "\n% mito. genes\n") +
+geom_hline(yintercept = max_percOfMitoGenes,
+           color = "red",
+           lty = 2
+           ) +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = c(0.85,0.85)
+          )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_merge_nbRNA_vs_percMito.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "y",
+           fill     = "violet"
+           )
+#dev.off()
+
+# Number of feature detected for each cell
+#max_nFeature <- mean(scRNAseq_Seurat_merge@meta.data$nFeature_RNA) + 2*sd(scRNAseq_Seurat_merge@meta.data$nFeature_RNA)
+
+# Mitochondrial gene filtering
+scRNAseq_Seurat_merge_nbGenes_percMito <- subset(x = scRNAseq_Seurat_merge_nbGenes,
+                                                  subset = percent.mito < max_percOfMitoGenes
+                                )
+
+# Append cell filtering table
+cellFiltering_nbGenes_percMito <- rbind(cellFiltering_nbGenes,
+                                        data.frame(filtering = "perc. mito.",
+                                                   nbOfCells = nrow(scRNAseq_Seurat_merge_nbGenes_percMito@meta.data)
+                                                   )
+                                        )
+
+cellFiltering_nbGenes_percMito
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_cellFiltering_nbGenes_percMito.pdf"), width = 12, height = 8)
+ggplot(data = cellFiltering_nbGenes_percMito,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,20000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_fill_manual(values = c("black","darkgreen", "green")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+## Data normalization
+
+```{r data_normalization}
+
+# Normalization
+scRNAseq_Seurat_merge_nbGenes_percMito_norm <- NormalizeData(object                = scRNAseq_Seurat_merge_nbGenes_percMito,
+                                                              normalization.method  = "LogNormalize",
+                                                              scale.factor          = 10000
+                                                              )
+
+
+```
+
+# Assign cell-cycle scores
+
+```{r assign_cellCycle_scores}
+
+# Cell cycle gene markers (present in Seurat)
+str(cc.genes)
+length(cc.genes$s.genes)
+length(cc.genes$g2m.genes)
+
+cc.genes$g2m.genes
+cc.genes$s.genes
+
+# Compute cell cycle scoring  
+scRNAseq_Seurat_merge_nbGenes_percMito_norm <- CellCycleScoring(object        = scRNAseq_Seurat_merge_nbGenes_percMito_norm,
+                                   s.features    = cc.genes$s.genes,
+                                   g2m.features  = cc.genes$g2m.genes
+                                   )
+
+# Check meta data
+colnames(scRNAseq_Seurat_merge_nbGenes_percMito_norm@meta.data)
+head(scRNAseq_Seurat_merge_nbGenes_percMito_norm@meta.data)
+
+# Plot covariate distribution
+plot(density(scRNAseq_Seurat_merge_nbGenes_percMito_norm@meta.data$S.Score))
+
+plot(density(scRNAseq_Seurat_merge_nbGenes_percMito_norm@meta.data$G2M.Score))
+
+```
+
+# Pre-analysis
+
+This part of analysis aims to (1) find the minimun number of PCs and (2) look at the effect of covariates on clustering.
+
+
+## Find min number of PCs to use as PCmin in IKAP
+
+```{r feature_selection}
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA <- FindVariableFeatures(object            = scRNAseq_Seurat_merge_nbGenes_percMito_norm,
+                                                                         selection.method  = variableFeatures_method,
+                                                                         nfeatures         = nFeatures
+                                                                         )
+
+# Mean-variance scatter plot
+#pdf(file = paste0(pathToFigures,"variableFeaturePlot_scRNAseq_merge_PCA.pdf"), width = 12, height = 8)
+VariableFeaturePlot(scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA)
+#dev.off()
+
+nrow(scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA@assays$RNA)
+
+# Data scaling 
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA <- ScaleData(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA,
+                                                              features = rownames(scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA)
+                                                              )
+
+# PCA
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA <- RunPCA(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA)
+
+# PCs elbow plot
+PCmin <- 18
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_merge_PCA.pdf"), width = 12, height = 12)
+ElbowPlot(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA,
+          ndims = 50
+          ) +
+    geom_vline(xintercept = PCmin, lty = 2, color = "blue") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Heatmap of each PC
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_merge_PCA.pdf"), width = 15, height = 12)
+#png(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_merge_PCA.png"), width = 1000, height = 800)
+DimHeatmap(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA,
+           dims = 1:20,
+           ncol = 5,
+           raster = FALSE
+           )
+#dev.off()
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_merge_PCA.pdf"), width = 12, height = 12)
+DimPlot(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA,
+        reduction = "pca"
+        ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "right"
+          )
+#dev.off()
+
+```
+
+## Plot PCA and covariates
+
+```{r PCA_and_covariates}
+
+# Extract matrix
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA,
+                                                                              slot = "scale.data"                                              )                                                                 )
+
+head(scRNAseq_Seurat_merge_nbGenes_percMito_norm_matrix[,1:3])
+
+# Get HVF
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_mvGenes <- HVFInfo(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA,
+                                                               selection.method = "vst"
+                                                               )
+
+head(scRNAseq_Seurat_merge_nbGenes_percMito_norm_mvGenes)
+nrow(scRNAseq_Seurat_merge_nbGenes_percMito_norm_mvGenes)
+
+# Get most variable genes
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_mvGenes[order(scRNAseq_Seurat_merge_nbGenes_percMito_norm_mvGenes$variance.standardized, decreasing = TRUE),] %>% .[1:nFeatures,] -> mvGenes
+
+# Subset matrix
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_matrix_mvGenes <- scRNAseq_Seurat_merge_nbGenes_percMito_norm_matrix[as.vector(rownames(mvGenes)),]
+
+nrow(scRNAseq_Seurat_merge_nbGenes_percMito_norm_matrix_mvGenes)
+
+# PCA analysis
+PC        <- prcomp(data.frame(t(scRNAseq_Seurat_merge_nbGenes_percMito_norm_matrix_mvGenes)))
+eigVal    <- get_eigenvalue(PC)
+eigValPer <- round(eigVal$variance.percent, digits = 2)
+
+pci       <- data.frame(PC$x,scRNAseq_Seurat_merge_nbGenes_percMito_norm@meta.data)
+
+# Plot eigen value
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_PCA_eigValPer.pdf"), width = 10, height = 10)
+    #mutate(PC = paste0("PC",PC)) %>%
+ggplot() +
+    geom_bar(data = data.frame(PC = 1:50, eigValPer = eigValPer[1:50]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity"
+             ) +
+    geom_bar(data = data.frame(PC = 1:PCmin, eigValPer = eigValPer[1:PCmin]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity",
+             fill = "blue"
+             ) +
+    xlab(label = "\nPC") +
+    ylab(label = "% variability (eigen value)\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Plot PCA and sample
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_merge_PCA_sample.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = orig.ident),
+               size    = 1
+               ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of UMIs
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_merge_PCA_nbUMIs.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nCount_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of UMIs",
+                            type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of genes
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_merge_PCA_nbGenes.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nFeature_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of genes",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_merge_PCA_percMito.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = percent.mito),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "% mito",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and cell cycle phase
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_merge_PCA_cellCyclePhase.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = Phase),
+               size    = 1#,
+               #pch     = 21
+               ) +
+    #scale_fill_continuous(type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+## Clustering
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust <- FindNeighbors(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA,
+                                                                        dims = 1:PCmin
+                                                                        )
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust <- FindClusters(object     = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+                                                                       resolution = seq(from  = 0,
+                                                                                        to    = 2,
+                                                                                        by    = 0.1
+                                                                                        )
+                                                                       )      
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_merge.rds"
+                        )
+        )
+
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_merge.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust@meta.data,
+         prefix          = "RNA_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE
+         )
+#dev.off()
+
+choosenResolution <- 0.3
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution <- FindClusters(object     = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+                                                                                         resolution = choosenResolution
+                                                                                         )      
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_merge_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution@meta.data
+       ) +
+    stat_count(mapping = aes(x     = RNA_snn_res.0.3,
+                             fill  = orig.ident
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = RNA_snn_res.0.3,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              face     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+```
+
+## UMAP
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust <- RunUMAP(object       = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+                                                                  dims         = 1:PCmin,
+                                                                  n.neighbors  = 30
+                                                                  )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_clust.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("RNA_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 10
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_clust_sample.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "orig.ident",
+        label       = TRUE,
+        label.size  = 10
+        ) +
+    theme_bw() +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_clust_nbUMIs.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+            features = "nFeature_RNA",
+            reduction = "umap"
+            )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_clust_nbGenes.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+            features = "nCount_RNA",
+            reduction = "umap"
+            )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_clust_percMito.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+            features = "percent.mito",
+            reduction = "umap"
+            )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_clust_cellCyclePhase.pdf"), width = 12, height = 10)
+DimPlot(object      = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = FALSE,
+        label.size  = 10
+        ) +
+    theme_bw() +
+    theme(#legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.50
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers <- FindAllMarkers(object            = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+                                                                                 min.pct           = min_pct,
+                                                                                 logfc.threshold   = min_logfc,
+                                                                                 min.diff.pct      = min_diffPct,
+                                                                                 only.pos          = TRUE,
+                                                                                 min.cells.feature = min_cellsFeature
+                                                                                 )
+
+head(scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10,
+              face = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_merge_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_merge_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = nTop_markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=10))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_merge_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 10
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+            file        = paste0(pathToReport,"scRNAseq_merge_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust,
+            features = "SMARCB1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_merge_ATRT_SHH_VermisAnterior_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = "SMARCB1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+icicicicicicici
+
+# Run IKAP (scaling, PCA, clustering, differential analysis)
+
+```{r integratedData_ikap}
+
+# Loa IKAP functions
+source("/data/users/mandrian/rhabdoid_U830_projects/programmes/IKAP/Seurat3_code/IKAP_Seurat3.R")
+
+# Launch IKAP
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP <- IKAP(sobj        = scRNAseq_Seurat_merge_nbGenes_percMito_norm,
+                                                          out.dir     = "./IKAP_merge",
+                                                          r.kmax.est  = 2,
+                                                          pcs         = PCmin:50,
+                                                          confounders = c("percent.mito",
+                                                                          "S.Score",
+                                                                          "G2M.Score"
+                                                                          )
+                                                          )
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP.rds"
+                        )
+        )
+
+```
+
+## Optimum clustering and visualization
+
+```{r import_IKAP_results_markers}
+
+# Choosen clustering
+choosenClustering <- "PC16K17"
+
+choosenDim <- 1:17
+
+# Change default ident
+Idents(scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP) <- scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP@meta.data[[choosenClustering]]
+
+# Run UMAP
+scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP <- RunUMAP(object      = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+                                                             dims        = choosenDim,
+                                                             n.neighbors = 30
+                                                             )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_IKAP.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = choosenClustering,
+        label       = TRUE,
+        label.size  = 10
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 40),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+## Number of cell per cluster
+
+```{r numberOfCellPerCluster}
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_IKAP_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP@meta.data
+       ) +
+    stat_count(mapping = aes(x     = factor(eval(as.name(choosenClustering)),order(levels(scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP@meta.data[,choosenClustering])))
+                             ),
+               fill = "darkgreen"
+               ) +
+    geom_text(mapping  = aes(x     = eval(as.name(choosenClustering)),
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              fontface     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+```
+
+###  Average expression matrix
+
+```{r average_expression_matrix}
+
+DefaultAssay(scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP)
+
+#Extract scaled integrated
+matrix_merge_IKAP <- AverageExpression(object     = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP)$RNA
+
+head(matrix_merge_IKAP)
+nrow(matrix_merge_IKAP)
+
+# Export matrix
+write.table(x      = matrix_merge_IKAP,
+            file   = paste0(pathToReport,"matrix_merge_IKAP.txt"),
+            sep    = "\t",
+            quote  = FALSE
+            )
+
+```
+
+## Differential analysis results
+
+```{r import_IKAP_results_markers}
+
+# Import IKAP result of marker genes
+IKAP_markers_merge <- readRDS(file = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/svn/analyse/script/IKAP_merge/markers.all.rds")
+
+head(IKAP_markers_merge[[choosenClustering]])
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_IKAP_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = IKAP_markers_merge[[choosenClustering]],
+       mapping = aes(x = factor(cluster, levels =order(levels(factor(IKAP_markers_merge[[choosenClustering]][,"cluster"])))),
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10,
+              face = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Export marker table
+write.table(x           = IKAP_markers_merge[[choosenClustering]],
+            file        = paste0(pathToReport,"scRNAseq_merge_cluster_geneMarkers_IKAP.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_merge_IKAP_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+          features = IKAP_markers_merge[[choosenClustering]]$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+topMarkers <- IKAP_markers_merge[[choosenClustering]] %>%
+    group_by(cluster) %>%
+    top_n(n = nTop, wt = avg_logFC)
+topMarkers
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_merge_IKAP_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+          features = topMarkers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=20))
+#dev.off()
+
+```
+
+# Cell type identification
+
+## Tumor cells identification
+
+### Import and explore cell types database
+
+```{r importCellTypeMarkers}
+
+# Import cannonical and published cell type markers
+cellType_markers <- read.table(file    = "/data/users/mandrian/rhabdoid_U830_projects/annotation_file/cellType_markers.csv",
+                               header  = TRUE,
+                               sep     = "\t"
+                               )
+head(cellType_markers)
+
+# Gene markers per cell type
+group_by(.data = filter(cellType_markers,
+                        Cell.type == "Microglia"
+                        )
+         #,Cell.type
+         ,Source
+         ) %>%
+    summarise(number = n()) %>%
+    print(n=nrow(.), width = Inf)
+
+```
+
+### Import and explore geneSet database
+
+```{r importCellTypeMarkers}
+
+# Import genSet
+geneSet <- read.table(file    = "/data/users/mandrian/rhabdoid_U830_projects/geneSet.csv",
+                               header  = TRUE,
+                               sep     = ";"
+                               )
+head(geneSet)
+
+# Gene markers per cell type
+group_by(.data = geneSet,
+         #,Cell.type
+         ,Group
+         ) %>%
+    summarise(number = n()) %>%
+    print(n=nrow(.), width = Inf)
+
+```
+
+### ATRT SHH signature expression
+
+```{r SHH_markers_expression}
+
+# Select SHH gene signatures
+geneSet_ATRT_SHH <- filter(.data = geneSet,
+                           Group == "ATRT_SHH(1)"
+                           )
+
+nrow(geneSet_ATRT_SHH)
+
+as.vector(geneSet_ATRT_SHH$Gene)
+
+# ATRT SHH signature gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_IKAP_ATRT_SHH_genes.pdf"), width = 14, height = 10)
+FeaturePlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+            features = as.vector(geneSet_ATRT_SHH$Gene),
+            pt.size  = 0.25
+            )
+#dev.off()
+
+# ATRT SHH signature gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_merge_IKAP_ATRT_SHH_genes.pdf"), width = 16, height = 8)
+VlnPlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+        features = as.vector(geneSet_ATRT_SHH$Gene),
+        pt.size = 0
+        )
+#dev.off()
+
+```
+
+### ATRT MYC signature expression
+
+```{r MYC_markers_expression}
+
+# Select MYC gene signatures
+geneSet_ATRT_MYC <- filter(.data = geneSet,
+                           Group == "ATRT_MYC(2b)"
+                           )
+
+nrow(geneSet_ATRT_MYC)
+
+as.vector(geneSet_ATRT_MYC$Gene)
+
+# ATRT MYC signature gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_IKAP_ATRT_MYC_genes.pdf"), width = 14, height = 10)
+FeaturePlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+            features = as.vector(geneSet_ATRT_MYC$Gene),
+            pt.size  = 0.25
+            )
+#dev.off()
+
+# ATRT MYC signature gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_merge_IKAP_ATRT_MYC_genes.pdf"), width = 16, height = 8)
+VlnPlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+        features = as.vector(geneSet_ATRT_MYC$Gene),
+        pt.size = 0
+        )
+#dev.off()
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_IKAP_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+            features = "SMARCB1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_merge_IKAP_ATRT_SHH_VermisAnterior_SMARCB1.pdf"), width = 16, height = 8)
+VlnPlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+        features = "SMARCB1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+### Canonical markers expression
+
+#### Immune cells canonical markers
+
+```{r immuneCells}
+
+# Select immune cells canonical markers
+cellType_markers_immuneCell_canonical <- filter(.data = cellType_markers,
+                                                Source == "canonical marker",
+                                                Group == "immune cells",
+                                                Organism == "human"
+                                                )
+
+
+as.vector(cellType_markers_immuneCell_canonical$Gene)
+
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_IKAP_immuneCells_canonicalMarkers.pdf"), width = 16, height = 10)
+FeaturePlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+            features = unique(as.vector(cellType_markers_immuneCell_canonical$Gene)),
+            pt.size  = 0.25
+            )
+#dev.off()
+
+```
+
+# Create human-mouse gene name conversion
+
+```{r human_mouse_conversion}
+
+# Load human and mouse ensembl datasets annotation
+human <- useMart(biomart="ensembl", dataset="hsapiens_gene_ensembl")
+mouse <- useMart(biomart="ensembl", dataset="mmusculus_gene_ensembl")
+
+# Create human gene symbol and mouse orthologous gene symbol corresponding table
+symbols_conversion <- getLDS(attributes  = c("hgnc_symbol"),
+                             mart        = human,
+                             attributesL = "mgi_symbol",
+                             martL       = mouse,
+                             uniqueRows  = TRUE
+                             )
+head(symbols_conversion)
+
+# Add mouse orthologous gene symbol
+IKAP_markers_merge_choosenClustering <- merge(x      = IKAP_markers_merge[[choosenClustering]],
+                                                       y      = symbols_conversion,
+                                                       by.x   = "gene",
+                                                       by.y   = "HGNC.symbol",
+                                                       all.x  = TRUE,
+                                                       all.y  = FALSE
+                                                       )
+head(IKAP_markers_merge_choosenClustering)
+
+```
+
+#### Microglia gene set from Jessa2019
+
+```{r immuneCells}
+
+# Select immune cells canonical markers
+cellType_markers_Microglia_Jessa2019 <- filter(.data = cellType_markers,
+                                               Source == "Jessa et al., 2019",
+                                               Cell.type == "Microglia",
+                                               Organism == "murine"
+                                               )
+
+
+
+head(cellType_markers_Microglia_Jessa2019$Gene)
+
+cluster <- vector()
+k <- vector()
+K <- vector()
+pVal <- vector()
+for (clust in levels(IKAP_markers_merge_choosenClustering$cluster))
+{
+    g <- filter(.data    = IKAP_markers_merge_choosenClustering,
+                cluster  == clust
+                )$MGI.symbol
+    K <- c(K,length(g))
+    G <- as.vector(cellType_markers_Microglia_Jessa2019$Gene)
+    # Intersect cluster gene markers and cell type markers
+    gG <- intersect(g,G)
+    k <- c(k,length(gG))
+    # Hypergeometric test
+    p <- computeHypergeometrix_pval(x = g,
+                                    y = G,
+                                    N = nrow(scRNAseq_Seurat_merge)
+                                    )
+    pVal <- c(pVal,p)
+    cluster <- c(cluster,clust)
+}
+overlap_merge_markers_Microglia_Jessa2019 <- data.frame(cluster,k,K,pVal)
+
+# Compute q values
+overlap_merge_markers_Microglia_Jessa2019$qVal <- qvalue(p = overlap_merge_markers_Microglia_Jessa2019$pVal)$qvalues
+overlap_merge_markers_Microglia_Jessa2019
+
+# Keep cluster order for ggplot
+overlap_merge_markers_Microglia_Jessa2019$cluster <- factor(overlap_merge_markers_Microglia_Jessa2019$cluster,
+                                                                     levels = overlap_merge_markers_Microglia_Jessa2019$cluster
+                                                                     )
+
+# Plot barplot
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_IKAP_markers_Microglia_Jessa2019.pdf"), width = 16, height = 8)
+ggplot(data    = overlap_merge_markers_Microglia_Jessa2019,
+       mapping = aes(x = cluster,
+                     y = -log10(qVal)
+                     )
+       ) +
+    geom_bar(stat = "identity",
+             fill = "brown"
+             ) +
+    #coord_flip() +
+    xlab("\nCluster") +
+    ylab("-log10(q-value)\n") +
+    #ylim(0,xlim) +
+    #geom_text(mapping = aes(label=paste0("(",k,"/",K,")")),
+     #         size = 10,
+      #        hjust = -0.1
+       #       ) +
+    theme_bw() +
+    theme(text         = element_text(size=40, color = "black"),
+          panel.border = element_blank(),
+          axis.text.x  = element_text(color = "black")
+          )
+#dev.off()
+
+```
+
+### Microglia marker Soussa2017
+
+```{r SMARCB1_expression}
+
+# Select immune cells canonical markers
+cellType_markers_Microglia_Soussa2017 <- filter(.data = cellType_markers,
+                                                Source == "Sousa et al., 2017",
+                                                Cell.type == "Microglia",
+                                                Organism == "murine"
+                                                )
+
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_merge_IKAP_Microglia_Soussa2017.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+            features = symbols_conversion[symbols_conversion$MGI.symbol == cellType_markers_Microglia_Soussa2017$Gene,"HGNC.symbol"],
+            pt.size  = 1
+            ) +
+    #ggtitle(label = "") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_merge_IKAP_Microglia_Soussa2017.pdf"), width = 16, height = 8)
+VlnPlot(object   = scRNAseq_Seurat_merge_nbGenes_percMito_norm_IKAP,
+        features = symbols_conversion[symbols_conversion$MGI.symbol == cellType_markers_Microglia_Soussa2017$Gene,"HGNC.symbol"],
+        pt.size = 0
+        ) +
+    #ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+#### Microglia gene set from Zhang2014
+
+```{r immuneCells}
+
+# Select immune cells canonical markers
+cellType_markers_Microglia_Zhang2014 <- filter(.data = cellType_markers,
+                                               Source == "Zhang et al., 2014",
+                                               Cell.type == "Microglia",
+                                               Organism == "murine"
+                                               )
+
+
+length(cellType_markers_Microglia_Zhang2014$Gene)
+
+cluster <- vector()
+k <- vector()
+K <- vector()
+pVal <- vector()
+for (clust in levels(IKAP_markers_merge_choosenClustering$cluster))
+{
+    g <- filter(.data    = IKAP_markers_merge_choosenClustering,
+                cluster  == clust
+                )$MGI.symbol
+    K <- c(K,length(g))
+    G <- as.vector(cellType_markers_Microglia_Zhang2014$Gene)
+    # Intersect cluster gene markers and cell type markers
+    gG <- intersect(g,G)
+    k <- c(k,length(gG))
+    # Hypergeometric test
+    p <- computeHypergeometrix_pval(x = g,
+                                    y = G,
+                                    N = nrow(scRNAseq_Seurat_merge)
+                                    )
+    pVal <- c(pVal,p)
+    cluster <- c(cluster,clust)
+}
+overlap_merge_markers_Microglia_Zhang2014 <- data.frame(cluster,k,K,pVal)
+
+# Compute q values
+overlap_merge_markers_Microglia_Zhang2014$qVal <- qvalue(p = overlap_merge_markers_Microglia_Zhang2014$pVal)$qvalues
+
+overlap_merge_markers_Microglia_Zhang2014
+
+# Keep cluster order for ggplot
+overlap_merge_markers_Microglia_Zhang2014$cluster <- factor(overlap_merge_markers_Microglia_Zhang2014$cluster,
+                                                                     levels = overlap_merge_markers_Microglia_Zhang2014$cluster
+                                                                     )
+
+# Plot barplot
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_merge_IKAP_markers_Microglia_Zhang2014.pdf"), width = 16, height = 10)
+ggplot(data    = overlap_merge_markers_Microglia_Zhang2014,
+       mapping = aes(x = cluster,
+                     y = -log10(qVal)
+                     )
+       ) +
+    geom_bar(stat = "identity",
+             fill = "brown"
+             ) +
+    #coord_flip() +
+    xlab("\nCluster") +
+    ylab("-log10(q-value)\n") +
+    #ylim(0,xlim) +
+    #geom_text(mapping = aes(label=paste0("(",k,"/",K,")")),
+     #         size = 10,
+      #        hjust = -0.1
+       #       ) +
+    theme_bw() +
+    theme(text         = element_text(size=40, color = "black"),
+          panel.border = element_blank(),
+          axis.text.x  = element_text(color = "black")
+          )
+#dev.off()
+
+```
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

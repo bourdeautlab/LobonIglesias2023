@@ -1,0 +1,3331 @@
+---
+title: "Human ATRT RNAseq data"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "cellOrigin_ATRT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+pathToRNApip_RESULT          <- paste0(pathToThisProject,"RNApip_RESULT/")
+pathToFeatureCounts          <- paste0(pathToThisProject,"FeatureCounts_RESULT/")
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("cellOrigin_ATRT_scRNAseq_INI254.RData")
+
+#save.image(file="cellOrigin_ATRT_scRNAseq_INI254.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+source("scRNAseq_functions.R")
+
+```
+
+```{r delete_all_objects}
+
+# Delete all objects
+#rm(list = ls())
+
+```
+
+# INI254 scRNA-seq
+
+## Load data and create Seurat object
+
+```{r load_data}
+
+pathTo_INI254_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/INI254/count/INI254_count_aggr/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+INI254_data <- Read10X(data.dir         = pathTo_INI254_cellRangerCount,
+                       gene.column      = 2,
+                       unique.features  = TRUE
+                       )
+
+# Create Seurat object
+scRNAseq_Seurat_INI254 <- CreateSeuratObject(counts   = INI254_data,
+                                             project  = "INI254"
+                                             )
+```
+
+## Cell QC and filtering
+
+```{r create_table_of_nbOfCell_after_filtering}
+
+# Create data frame
+cellFiltering <- data.frame(filtering = "no filtering",
+                            nbOfCells = nrow(scRNAseq_Seurat_INI254@meta.data)
+                            )
+
+cellFiltering
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_cellFiltering.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering,
+       mapping = aes(x = filtering,
+                     y = nbOfCells
+                     ),
+             ) +
+    geom_bar(stat = "identity",
+             fill = "black"
+             ) +
+    ylim(0,10000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Compute percent of reads map on mitochondrial and ribosomal proteins
+
+```{r mito_ribo_reads_fraction}
+
+# Ribosomal protein reads fraction
+scRNAseq_Seurat_INI254[["percent.riboProt"]] <- PercentageFeatureSet(object  = scRNAseq_Seurat_INI254,
+                                                                     pattern = "^RP[LS].*",
+                                                                     assay   = "RNA"
+                                                                     )
+
+# Mitocondrial genes percentage
+scRNAseq_Seurat_INI254[["percent.mito"]] <- PercentageFeatureSet(object   = scRNAseq_Seurat_INI254,
+                                        #features = as.vector(as.character(mitoGenes$`Approved symbol`)),
+                                                                 pattern = "^MT-",
+                                                                 assay = "RNA"
+                                                                 )
+
+
+head(scRNAseq_Seurat_INI254@meta.data)
+
+```
+
+### Number of genes and number of RNA (UMIs)
+
+```{r number_of_genes_per_cell}
+
+head(scRNAseq_Seurat_INI254@meta.data)
+
+# Set minimum number of genes
+min_nFeature <- round(quantile(scRNAseq_Seurat_INI254@meta.data$nFeature_RNA,
+         probs = 0.05
+         ))
+min_nFeature
+
+# Density distribution of total RNA count
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_INI254_nbRNA.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254@meta.data) +
+    geom_histogram(mapping = aes(x = nCount_RNA),
+                   fill = "yellow",
+                   color = "black",
+                   binwidth = 1000
+                   ) +
+    xlab(label = "\nnb of RNA (UMI)") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Density distribution of detected genes
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_INI254_nbGenes.pdf"), width = 12, height = 12)
+ggplot() +
+    geom_histogram(data = filter(scRNAseq_Seurat_INI254@meta.data, nFeature_RNA >= 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "blue",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    geom_histogram(data = filter(scRNAseq_Seurat_INI254@meta.data, nFeature_RNA < 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "grey",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    xlab(label = "\nnb of genes") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Scatter plot nCount_RNA and nFeature_RNA
+p <- ggplot() +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254@meta.data,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "darkgreen"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    xlab(label = "\nRNA count (UMI)") +
+    ylab(label = "nb of genes\n") +
+    theme_bw() +
+    geom_hline(yintercept = min_nFeature,
+               color = "red",
+               lty = 2
+               ) +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold")
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_INI254@meta.data$nCount_RNA) - min(scRNAseq_Seurat_INI254@meta.data$nCount_RNA))/2,
+                            y = min_nFeature
+                            ),
+              label = min_nFeature,
+              color = "red",
+              size = 15,
+              nudge_y = max(scRNAseq_Seurat_INI254@meta.data$nFeature_RNA)/20
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_INI254_nbRNA_vs_nbGene.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "yellow"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Add UMIs/gene to meta.data
+nCount_per_Feature <- scRNAseq_Seurat_INI254@meta.data$nCount_RNA/scRNAseq_Seurat_INI254@meta.data$nFeature_RNA
+
+scRNAseq_Seurat_INI254 <- AddMetaData(object    = scRNAseq_Seurat_INI254,
+                                      metadata  = nCount_per_Feature,
+                                      col.name  = "nCount_per_Feature"
+                                      )
+
+head(scRNAseq_Seurat_INI254@meta.data)
+
+# Density distribution of the number of UMIs per gene
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_INI254_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254@meta.data) +
+    geom_histogram(mapping = aes(x = nCount_per_Feature,
+                                 y = ..density..
+                                 ),
+                   color = "darkgreen",
+                   fill = "white"
+                   ) +
+        geom_density(mapping = aes(x = nCount_per_Feature),
+                     color = "red",
+                     size = 2
+                 ) +
+    xlab(label = "\nUMIs/gene") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Number of gene filtering
+scRNAseq_Seurat_INI254_nbGenes <- subset(x = scRNAseq_Seurat_INI254,
+                                         subset = nFeature_RNA > min_nFeature
+                                         )
+
+# Append cell filtering table
+cellFiltering_nbGenes <- rbind(cellFiltering,
+                               data.frame(filtering = "nb genes",
+                                          nbOfCells = nrow(scRNAseq_Seurat_INI254_nbGenes@meta.data)
+                                          )
+                               )
+
+cellFiltering_nbGenes
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_cellFiltering_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering_nbGenes,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,10000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_fill_manual(values = c("black","darkgreen")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Mitochondrial genes
+
+```{r QC_filtering}
+
+# Import mitochondrial gene info
+pathToMitoGenes <- paste0(pathToData,"/mitochondrialRNA/group-1974.csv")
+
+mitoGenes <- read.table(file         = pathToMitoGenes,
+                        skip         = 1,
+                        header       = TRUE,
+                        quote        = '"',
+                        sep          = ",",
+                        check.names  = FALSE
+                        )
+
+head(mitoGenes)
+
+# Mitocondrial genes percentage
+scRNAseq_Seurat_INI254_nbGenes[["percent.mito"]] <- PercentageFeatureSet(object   = scRNAseq_Seurat_INI254_nbGenes,
+                                                                         features = as.vector(as.character(mitoGenes$`Approved symbol`)),
+                                                                         assay = "RNA"
+                                                              )
+
+head(scRNAseq_Seurat_INI254_nbGenes@meta.data)
+
+# Export for supp. paper figure in integrated script
+write.table(x = scRNAseq_Seurat_INI254@meta.data,
+            file = "scRNAseq_Seurat_INI254_metadata.txt",
+            quote = FALSE,
+            sep = ","
+            )
+
+write.table(x = scRNAseq_Seurat_INI254_nbGenes@meta.data,
+            file = "scRNAseq_Seurat_INI254_nbGenes_metadata.txt",
+            quote = FALSE,
+            sep = ","
+            )
+
+# Set percentage of count falling in mitochondrial genes
+max_percOfMitoGenes <- 5
+
+# Scatter plot
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_INI254_nbGenes@meta.data,
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254_nbGenes@meta.data,
+                             percent.mito < max_percOfMitoGenes
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "blue"
+               ) +
+    xlab(label = "\nnb of RNA (UMI count)") +
+ylab(label = "\n% mito. genes\n") +
+geom_hline(yintercept = max_percOfMitoGenes,
+           color = "red",
+           lty = 2
+           ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_INI254@meta.data$nCount_RNA) - min(scRNAseq_Seurat_INI254@meta.data$nCount_RNA))/2,
+                            y = max_percOfMitoGenes
+                            ),
+              label = paste0(max_percOfMitoGenes," %"),
+              color = "red",
+              size = 15,
+              nudge_y = 2
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_INI254_nbRNA_vs_percMito.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "y",
+           fill     = "violet"
+           )
+#dev.off()
+
+# Number of feature detected for each cell
+#max_nFeature <- mean(scRNAseq_Seurat_INI254@meta.data$nFeature_RNA) + 2*sd(scRNAseq_Seurat_INI254@meta.data$nFeature_RNA)
+
+# Mitochondrial gene filtering
+scRNAseq_Seurat_INI254_nbGenes_percMito <- subset(x = scRNAseq_Seurat_INI254_nbGenes,
+                                                  subset = percent.mito < max_percOfMitoGenes
+                                )
+
+# Append cell filtering table
+cellFiltering_nbGenes_percMito <- rbind(cellFiltering_nbGenes,
+                                        data.frame(filtering = "perc. mito.",
+                                                   nbOfCells = nrow(scRNAseq_Seurat_INI254_nbGenes_percMito@meta.data)
+                                                   )
+                                        )
+
+cellFiltering_nbGenes_percMito
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_cellFiltering_nbGenes_percMito.pdf"), width = 12, height = 8)
+ggplot(data = cellFiltering_nbGenes_percMito,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,10000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_fill_manual(values = c("black","darkgreen", "green")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Fraction of reads map to ribosomal proteins
+
+```{r QC_filtering}
+
+# Scatter plot nb of genes and fraction of reads map to ribosomal proteins
+p <- ggplot() +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254@meta.data,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "darkgreen"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "grey",
+               fill = "yellow"
+               ) +
+    xlab(label = "\n% ribo prot reads") +
+    ylab(label = "nb of genes\n") +
+    theme_bw() +
+    geom_hline(yintercept = min_nFeature,
+               color = "red",
+               lty = 2
+               ) +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold")
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_INI254@meta.data$percent.riboProt) - min(scRNAseq_Seurat_INI254@meta.data$percent.riboProt))/2,
+                            y = min_nFeature
+                            ),
+              label = min_nFeature,
+              color = "red",
+              size = 15,
+              nudge_y = max(scRNAseq_Seurat_INI254@meta.data$nFeature_RNA)/20
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_INI254_percRiboProt_vs_nbGene.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "green"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Scatter plot percent of ribosomal protein reads vs percent of mitochondrial reads
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_INI254@meta.data,
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254@meta.data,
+                             percent.mito < max_percOfMitoGenes,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "blue"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey",
+               fill = "yellow"
+               ) +
+    xlab(label = "\n% ribo prot reads") +
+ylab(label = "\n% mito. genes\n") +
+geom_hline(yintercept = max_percOfMitoGenes,
+           color = "red",
+           lty = 2
+           ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_INI254@meta.data$percent.riboProt) - min(scRNAseq_Seurat_INI254@meta.data$percent.riboProt))/2,
+                            y = max_percOfMitoGenes
+                            ),
+              label = paste0(max_percOfMitoGenes," %"),
+              color = "red",
+              size = 15,
+              nudge_y = 2
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_INI254_percRiboProt_vs_percMito.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "green"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Check if distribution is multimodal (assuming that the data are drawn from more normals)
+library(mclust)
+gmm <- Mclust(scRNAseq_Seurat_INI254@meta.data$percent.riboProt)
+summary(gmm)
+
+```
+
+
+## Data normalization
+
+```{r data_normalization}
+
+# Normalization
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm <- NormalizeData(object                = scRNAseq_Seurat_INI254_nbGenes_percMito,
+                                                              normalization.method  = "LogNormalize",
+                                                              scale.factor          = 10000
+                                                              )
+
+```
+
+
+# Cell cylcle phase identification (Using Andrey's method)
+
+This methode is based on pseudo-time approach.
+
+```{r cellCycle}
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA <- FindVariableFeatures(object            = scRNAseq_Seurat_INI254_nbGenes_percMito_norm,
+                                                                         selection.method  = variableFeatures_method,
+                                                                         nfeatures         = nFeatures
+                                                                         )
+
+# Data scaling 
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA <- ScaleData(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+                                                              features = rownames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA)
+                                                              )
+
+
+# Run ICA
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA <- RunICA(object           = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA,
+                                                           ica.function     = "icafast",
+                                                           nics             = 50,
+                                                           ndims.print      = 1:20,
+                                                           nfeatures.print  = 30,
+                                                           reduction.name   = "ica",
+                                                           reduction.key    = "ica_",
+                                                           seed.use         = 1234
+                                                           )
+
+
+# Plot ICA
+#pdf(file = paste0(pathToFigures,"ica_scRNAseq_INI254_clust.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA,
+        reduction   = "ica",
+        dims        = c(2,3),
+        pt.size     = 1,
+        #group.by    = paste0("RNA_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+str(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA, levels=3)
+
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA@reductions$ica@cell.embeddings)
+
+
+devtools::install_github("AckerDWM/gg3D")
+
+library(gg3D)
+
+# Plot 3D ICA
+ggplot(data = data.frame(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA@reductions$ica@cell.embeddings),
+       mapping = aes(x = ica_1,
+                     y = ica_2,
+                     z = ica_26
+                     )
+       ) +
+    axes_3D() +
+    stat_3D() +           
+    theme_bw()
+
+ggplot(data = data.frame(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA@reductions$ica@cell.embeddings),
+       mapping = aes(x = ica_1,
+                     y = ica_2
+                     )
+       ) +
+    geom_point() +           
+    theme_bw()
+
+```
+
+# Cell cylcle phase identification (Using Andrey's method)
+
+This methode is based on pseudo-time approach.
+
+```{r cellCycle}
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA <- FindVariableFeatures(object            = scRNAseq_Seurat_INI254_nbGenes_percMito_norm,
+                                                                         selection.method  = variableFeatures_method,
+                                                                         nfeatures         = nFeatures
+                                                                         )
+
+# Data scaling 
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA <- ScaleData(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+                                                              features = rownames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA)
+                                                              )
+
+
+# Run ICA
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA <- RunICA(object           = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA,
+                                                           ica.function     = "icafast",
+                                                           nics             = 50,
+                                                           ndims.print      = 1:20,
+                                                           nfeatures.print  = 30,
+                                                           reduction.name   = "ica",
+                                                           reduction.key    = "ica_",
+                                                           seed.use         = 1234
+                                                           )
+
+
+# Plot ICA
+#pdf(file = paste0(pathToFigures,"ica_scRNAseq_INI254_clust.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA,
+        reduction   = "ica",
+        dims        = c(1,2), #14
+        pt.size     = 1#,
+        #group.by    = paste0("RNA_snn_res.",choosenResolution),
+        #label       = TRUE,
+        #label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+str(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA, levels=3)
+
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA@reductions$ica@cell.embeddings)
+
+library(gg3D)
+
+# Plot 3D ICA
+g_angle1 <- ggplot(data    = data.frame(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA@reductions$ica@cell.embeddings),
+                   mapping = aes(x = ica_1,
+                                 y = ica_2,
+                                 z = ica_3
+                                 )
+                   ) +
+    axes_3D(theta = 60, phi = 10) +
+    stat_3D(theta = 60, phi = 10) +           
+    labs_3D(labs  = c("ICA1","ICA2","ICA3"),
+            hjust = c(0,1,1),
+            vjust = c(-0.5,-0.5,-0.5),
+            angle = c(120,10,95),
+            theta = 60,
+            phi   = 10
+            ) +
+    theme_void()
+#
+g_angle2 <- ggplot(data    = data.frame(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA@reductions$ica@cell.embeddings),
+                   mapping = aes(x = ica_1,
+                                 y = ica_2,
+                                 z = ica_3
+                                 )
+                   ) +
+    axes_3D(theta = 120, phi = 10) +
+    stat_3D(theta = 120, phi = 10) +
+    labs_3D(labs  = c("ICA1","ICA2","ICA3"),
+            hjust = c(0,1,1),
+            vjust = c(-0.5,-0.5,-0.5),
+            angle = c(40,-20,90),
+            theta = 120,
+            phi   = 10
+            ) +
+    theme_void()
+#
+g_angle3 <- ggplot(data    = data.frame(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA@reductions$ica@cell.embeddings),
+                   mapping = aes(x = ica_1,
+                                 y = ica_2,
+                                 z = ica_3
+                                 )
+                   ) +
+    axes_3D(theta = 180, phi = 40) +
+    stat_3D(theta = 180, phi = 40) +           
+    labs_3D(labs  = c("ICA1","ICA2","ICA3"),
+            hjust = c(0,1,1),
+            vjust = c(-0.5,-0.5,-0.5),
+            angle = c(0,-80,80),
+            theta = 180,
+            phi   = 40
+            ) +
+    theme_void()
+#
+#pdf(file = paste0(pathToFigures,"ica_3d_scRNAseq_INI254.pdf"), width = 20, height = 6)
+plot_grid(g_angle1,
+          g_angle2,
+          g_angle3,
+          ncol = 3
+          )
+#dev.off()
+
+# Build matrix from selected compontents
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_matrix <- scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA@reductions$ica@cell.embeddings[,c("ica_1","ica_2","ica_3")]
+
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_matrix)
+
+```
+
+## Compute pseudotime
+
+```{r cellCycle}
+
+#devtools::install_github("Albluca/distutils")
+#devtools::install_github("Albluca/ElPiGraph.R")
+
+library(ElPiGraph.R)
+
+# Construct a principal graph
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph <- computeElasticPrincipalCircle(X          = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_matrix,
+                                                                                            NumNodes   = 50,
+                                                                                            Do_PCA     = FALSE,
+                                                                                            nReps      = 10,
+                                                                                            ProbPoint  = 0.8#,
+                                                                                            #n.cores   = 8
+                                                                                            )
+
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph
+
+# Plot principal graph
+#pdf(file = paste0(pathToFigures,"epg_scRNAseq_INI254.pdf"), width = 14, height = 12)
+PlotPG(X         = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_matrix,
+       TargetPG  = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph[[length(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph)]],
+       BootPG    = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph[1:(length(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph)-1)],
+       PointSize = 1.5,
+       p.alpha = 0.5
+       )
+#dev.off()
+
+# Get igraph network object (to use in getPseudotime function below)
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_iGraph <- ConstructGraph(PrintGraph = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph[[11]])
+
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_iGraph
+
+# Get the substructure of interest (here the whole nodes)
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_circle <- GetSubGraph(Net        = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_iGraph,
+                                                                                 Structure  = "circle",
+                                                                                 Circular   = TRUE,
+                                                                                 KeepEnds   = TRUE,
+                                                                                 Nodes      = 50
+                                                                                 )
+
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_circle
+
+# Project point onto graph
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_projection <- project_point_onto_graph(X              = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_matrix,
+                                                                                                  NodePositions  = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph[[11]]$NodePositions,
+                                                                                                  Edges          = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph[[11]]$Edges$Edges
+                                                                                                  )
+
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_projection
+
+# Compute pseudotime
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_pseudotime <- getPseudotime(ProjStruct = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_projection,
+                                                                                       NodeSeq = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_circle$Circle_1
+                                                                                       )
+
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_pseudotime
+
+# Plot pseudotime distribution
+ggplot(data = data.frame(Pt = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_ICA_ElPiGraph_pseudotime$Pt)
+       ) +
+    geom_histogram(mapping = aes(x = Pt),
+                   fill = "grey",
+                   color = "black"
+                   ) +
+    theme_bw()
+    
+
+```
+
+
+# Assign cell-cycle scores
+
+```{r assign_cellCycle_scores}
+
+# Cell cycle gene markers (present in Seurat)
+str(cc.genes)
+length(cc.genes$s.genes)
+length(cc.genes$g2m.genes)
+
+cc.genes$g2m.genes
+cc.genes$s.genes
+
+# Compute cell cycle scoring  
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm <- CellCycleScoring(object        = scRNAseq_Seurat_INI254_nbGenes_percMito_norm,
+                                   s.features    = cc.genes$s.genes,
+                                   g2m.features  = cc.genes$g2m.genes
+                                   )
+
+# Check meta data
+colnames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm@meta.data)
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm@meta.data)
+
+# Plot covariate distribution
+plot(density(scRNAseq_Seurat_INI254_nbGenes_percMito_norm@meta.data$S.Score))
+
+plot(density(scRNAseq_Seurat_INI254_nbGenes_percMito_norm@meta.data$G2M.Score))
+
+```
+
+
+# Pre-analysis
+
+This part of analysis aims to (1) find the minimun number of PCs and (2) look at the effect of covariates on clustering.
+
+
+## Find min number of PCs
+
+```{r feature_selection}
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA <- FindVariableFeatures(object            = scRNAseq_Seurat_INI254_nbGenes_percMito_norm,
+                                                                         selection.method  = variableFeatures_method,
+                                                                         nfeatures         = nFeatures
+                                                                         )
+
+# Mean-variance scatter plot
+#pdf(file = paste0(pathToFigures,"variableFeaturePlot_scRNAseq_INI254_PCA.pdf"), width = 12, height = 8)
+VariableFeaturePlot(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA)
+#dev.off()
+
+nrow(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA@assays$RNA)
+
+# Data scaling 
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA <- ScaleData(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+                                                              features = rownames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA)
+                                                              )
+
+# PCA
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA <- RunPCA(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA)
+
+# PCs elbow plot
+PCmin <- 16
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_INI254_PCA.pdf"), width = 12, height = 12)
+ElbowPlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+          ndims = 50
+          ) +
+    geom_vline(xintercept = PCmin, lty = 2, color = "blue") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Heatmap of each PC
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_INI254_PCA.pdf"), width = 15, height = 9)
+DimHeatmap(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+           dims = 1:15,
+           ncol = 5
+           )
+#dev.off()
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_PCA.pdf"), width = 12, height = 12)
+DimPlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+        reduction = "pca"
+        ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+## Plot PCA and covariates
+
+```{r PCA_and_covariates}
+
+# Extract matrix
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+                                                                              slot = "scale.data"                                              )                                                                 )
+
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix[,1:3])
+
+# Plot density of scaled data
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix_melt <- melt(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix)
+
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix_melt)
+
+colnames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix_melt) <- c("gene","cell","scaledExprs")
+
+
+plot(density(exp(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix)))
+
+# Get HVF
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_mvGenes <- HVFInfo(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+                                                               selection.method = "vst"
+                                                               )
+
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_mvGenes)
+nrow(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_mvGenes)
+
+# Get most variable genes
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_mvGenes[order(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_mvGenes$variance.standardized, decreasing = TRUE),] %>% .[1:nFeatures,] -> mvGenes
+
+# Subset matrix
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix_mvGenes <- scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix[as.vector(rownames(mvGenes)),]
+
+nrow(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix_mvGenes)
+
+# PCA analysis
+PC        <- prcomp(data.frame(t(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_matrix_mvGenes)))
+eigVal    <- get_eigenvalue(PC)
+eigValPer <- round(eigVal$variance.percent, digits = 2)
+
+pci       <- data.frame(PC$x,scRNAseq_Seurat_INI254_nbGenes_percMito_norm@meta.data)
+
+# Plot eigen value
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_PCA_eigValPer.pdf"), width = 10, height = 10)
+    #mutate(PC = paste0("PC",PC)) %>%
+ggplot() +
+    geom_bar(data = data.frame(PC = 1:50, eigValPer = eigValPer[1:50]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity"
+             ) +
+    geom_bar(data = data.frame(PC = 1:PCmin, eigValPer = eigValPer[1:PCmin]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity",
+             fill = "blue"
+             ) +
+    xlab(label = "\nPC") +
+    ylab(label = "% variability (eigen value)\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Plot PCA and nb of UMIs
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_PCA_nbUMIs.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nCount_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of UMIs",
+                            type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of genes
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_PCA_nbGenes.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nFeature_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of genes",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb RNA per gene
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_PCA_nbRNA_per_gene.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(colour = nCount_per_Feature),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "UMIs/gene",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_PCA_percMito.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = percent.mito),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "% mito",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and cell cycle phase
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_PCA_cellCyclePhase.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = Phase),
+               size    = 1#,
+               #pch     = 21
+               ) +
+    #scale_fill_continuous(type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+# Clustering (Using PCmin as identified above)
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust <- FindNeighbors(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+                                                                        dims = 1:PCmin
+                                                                        )
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust <- FindClusters(object     = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+                                                                       resolution = seq(from  = 0,
+                                                                                        to    = 2,
+                                                                                        by    = 0.1
+                                                                                        )
+                                                                       )      
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_INI254.rds"
+                        )
+        )
+
+# Save as loom object
+as.loom(x         = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+        filename  = "cellOrigin_ATRT_scRNAseq_INI254.loom"
+        )
+
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+
+                                        # Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_INI254.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data,
+         prefix          = "RNA_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE,
+         color           = "red"
+         )
+#dev.off()
+
+choosenResolution <- 0.2
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution <- FindClusters(object     = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+                                                                                         resolution = choosenResolution
+                                                                                         )      
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_INI254_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution@meta.data
+       ) +
+    stat_count(mapping = aes(x     = RNA_snn_res.0.2,
+                             fill  = Phase
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = RNA_snn_res.0.2,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              face     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+# Export meta data (for SCENIC analysis)
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data)
+
+write.table(x      = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data,
+            file   = "scRNAseq_Seurat_INI254_PCmin_metaData.txt",
+            sep    = ",",
+            quote  = FALSE
+            )
+
+```
+
+## UMAP visualization
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust <- RunUMAP(object       = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+                                                                  dims         = 1:PCmin,
+                                                                  n.neighbors  = 30
+                                                                  )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("RNA_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+# UMAP and nb of UMIs
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_nbUMIs.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+            features = "nFeature_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_nbGenes.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+            features = "nCount_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+            features = "nCount_per_Feature",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_percMito.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+            features = "percent.mito",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and cell cycle phase
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_cellCyclePhase.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Boxplot of covariates per cluster
+
+```{r boxplot_and_covariates}
+
+# Boxplot and nb of UMIs
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_nbUMIs.pdf"), width = 12, height = 12)
+ ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = log10(nCount_RNA),
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = log10(nCount_RNA)
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "log10(UMI count)\n")+
+    ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nFeature_RNA,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nFeature_RNA
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "# genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nCount_per_Feature,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nCount_per_Feature
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "UMIs per gene\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_percMito.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = percent.mito,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = percent.mito
+                               ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "% mito genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.50
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers <- FindAllMarkers(object            = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+                                                                                 min.pct           = min_pct,
+                                                                                 logfc.threshold   = min_logfc,
+                                                                                 min.diff.pct      = min_diffPct,
+                                                                                 only.pos          = TRUE,
+                                                                                 min.cells.feature = min_cellsFeature
+                                                                                 )
+
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10#,
+              #fontface = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = nTop_markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=20))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_INI254_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 20
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+            file        = paste0(pathToReport,"scRNAseq_INI254_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust,
+            features = "SMARCB1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = "SMARCB1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+## SCENIC Analysis (PCmin)
+
+### Cellular enrichment of regulons using AUC score
+
+#### Import AUC score matrix
+
+```{r import_SCENIC_AUCscore}
+
+# Path to SCENIC result
+pathToSCENICresult <- paste0(pathToThisProject,"svn/analyse/script/SCENIC_INI254/")
+
+# Import SCENIC AUC score
+scRNAseq_INI254_scenic_auc_matrix <- read.csv(file = paste0(pathToSCENICresult,"scRNAseq_INI254_scenic_auc_matrix.csv"))
+head(scRNAseq_INI254_scenic_auc_matrix)
+
+dim(scRNAseq_INI254_scenic_auc_matrix)
+
+# Transpose AUC matrix
+scRNAseq_INI254_scenic_auc_matrix_t <- t(scRNAseq_INI254_scenic_auc_matrix)
+
+head(scRNAseq_INI254_scenic_auc_matrix_t)
+
+dim(scRNAseq_INI254_scenic_auc_matrix_t)
+
+# Density distribution
+scRNAseq_INI254_scenic_auc_matrix_t_melt <- melt(scRNAseq_INI254_scenic_auc_matrix_t)
+head(scRNAseq_INI254_scenic_auc_matrix_t_melt)
+
+AUCthres <- 0.05
+ggplot(data = scRNAseq_INI254_scenic_auc_matrix_t_melt) +
+    geom_density(mapping = aes(x = value
+                               ),
+                 fill = "grey"
+                 ) +
+    geom_vline(xintercept=AUCthres, color = "red") +
+    theme_bw()
+
+library(EMA)
+
+# Filtering
+scRNAseq_INI254_scenic_auc_matrix_t_filt <- expFilter(data      = scRNAseq_INI254_scenic_auc_matrix_t,
+                                                      threshold = AUCthres,
+                                                      p         = 0.05,
+                                                      graph     = TRUE
+                                                      )
+
+dim(scRNAseq_INI254_scenic_auc_matrix_t_filt)
+
+```
+
+#### Heatmap of AUC score
+
+```{r SCENIC_AUCscore_heatmap}
+
+# Most variable genes
+mvRegulons <- genes.selection(data      = scRNAseq_INI254_scenic_auc_matrix_t_filt,
+                              thres.num = 50
+                              )
+
+# Subset matrix
+scRNAseq_INI254_scenic_auc_matrix_t_filt_mvRegulons <- scRNAseq_INI254_scenic_auc_matrix_t_filt[mvRegulons,]
+
+# Check order
+all(rownames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data) == colnames(scRNAseq_INI254_scenic_auc_matrix_t_filt_mvRegulons))
+
+# Top annotation
+topAnnot_PCmin <- HeatmapAnnotation(df                      = data.frame(Cluster = as.character(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data[,"RNA_snn_res.0.2"]), check.names = FALSE),
+                                    col                     = list(Cluster = cluster_n8_col),
+                                    gap                     = unit(2,"mm"),
+                                    show_annotation_name    = TRUE,
+                                    annotation_name_gp      = gpar(fontsize    = 20),
+                                    annotation_legend_param = list(fontsize    = 20,
+                                                                   title_gp    = gpar(fontsize = 20, font = 2),
+                                                                   labels_gp   = gpar(fontsize = 20),
+                                                                   grid_width  = unit(12,"mm"),
+                                                                   grid_height = unit(12,"mm"),
+                                                                   ncol        = 1
+                                                                   ),
+                                    simple_anno_size        = unit(2,"cm"),
+                                    na_col                  = "white",
+                                    show_legend             = TRUE
+                                    )
+
+# Define heatmap color
+col_fun = colorRamp2(breaks = c(0,0.2,0.4,0.6), colors = c("cyan","wheat1","red","darkred"))
+
+# Heatmap
+h <- Heatmap(matrix                      = scRNAseq_INI254_scenic_auc_matrix_t_filt_mvRegulons,
+        clustering_distance_columns = "pearson",
+        clustering_method_columns   = "ward",
+        clustering_distance_rows    = "euclidean",
+        clustering_method_rows      = "ward",
+        cluster_rows                = TRUE,
+        show_row_names              = TRUE,
+        show_column_names           = FALSE,
+        column_title                = "cells",
+        row_title                   = "Top 50 most variable regulons",
+        top_annotation              = topAnnot_PCmin,
+        show_heatmap_legend         = TRUE,
+        column_dend_height          = unit(40, "mm"),
+        column_split                = 4,
+        row_split                   = 4,
+        col                         = col_fun,
+heatmap_legend_param        = list(color_bar      = "continuous",
+                                   grid_width     = unit(0.75,"cm"),
+                                   grid_height    = unit(2,"cm"),
+                                   legend_width   = unit(4,"cm"),
+                                   title          = "AUC\n score\n",
+                                   title_gp       = gpar(fontsize = 20),
+                                   legend_gp      = gpar(fontsize = 20),
+                                   title_position = "topcenter"
+                                   )
+)
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_SCENIC_AUCscore.pdf"), width = 12, height = 12)
+draw(h, heatmap_legend_side = "left")
+#dev.off()
+
+```
+
+#### UMAP of cells based on AUC score
+
+```{r AUCscore_umap}
+
+# Compute UMAP
+scRNAseq_INI254_scenic_auc_umap <- data.frame(umap(t(scRNAseq_INI254_scenic_auc_matrix_t_filt_mvRegulons)))
+head(scRNAseq_INI254_scenic_auc_umap)
+
+colnames(scRNAseq_INI254_scenic_auc_umap) <- c("UMAP1","UMAP2")
+head(scRNAseq_INI254_scenic_auc_umap)
+
+# Bind meta data
+scRNAseq_INI254_scenic_auc_umap_plus <- cbind(scRNAseq_INI254_scenic_auc_umap,
+                                              cluster = as.character(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data$RNA_snn_res.0.2)
+                                              )
+
+head(scRNAseq_INI254_scenic_auc_umap_plus)
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_SCENIC_AUCscore.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_INI254_scenic_auc_umap_plus,
+       mapping = aes(x = UMAP1, y = UMAP2)
+       ) +
+    geom_point(mapping = aes(color = cluster
+                             ),
+               size = 2
+               )+
+    xlab("UMAP1") +
+    ylab("UMAP2") +
+    ggtitle(NULL) +
+    theme_bw()+
+    theme(text               = element_text(size = 20),
+          legend.position    = "none"
+          #legend.title       = element_text(face = "bold"),
+          #legend.key.height  = unit(1.5,"cm")
+          )
+#dev.off()
+
+```	
+
+### Cellular enrichment of regulons using binarized AUC score
+
+#### Import binarized AUC score matrix
+
+```{r import_SCENIC_bin_AUCscore}
+
+# Import SCENIC AUC score
+scRNAseq_INI254_scenic_auc_matrix_bin <- read.csv(file = paste0(pathToSCENICresult,"scRNAseq_INI254_scenic_auc_matrix_bin.csv"))
+head(scRNAseq_INI254_scenic_auc_matrix_bin)
+
+dim(scRNAseq_INI254_scenic_auc_matrix_bin)
+
+# Transpose AUC_BIN matrix
+scRNAseq_INI254_scenic_auc_matrix_bin_t <- t(scRNAseq_INI254_scenic_auc_matrix_bin)
+
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t)
+
+dim(scRNAseq_INI254_scenic_auc_matrix_bin_t)
+
+# Density distribution
+scRNAseq_INI254_scenic_auc_matrix_bin_t_melt <- melt(scRNAseq_INI254_scenic_auc_matrix_bin_t)
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t_melt)
+
+scRNAseq_INI254_scenic_auc_matrix_bin_t_melt <- mutate(.data = scRNAseq_INI254_scenic_auc_matrix_bin_t_melt,
+                                                       value = as.character(value)
+                                                       )
+
+ggplot(data = scRNAseq_INI254_scenic_auc_matrix_bin_t_melt) +
+    geom_bar(mapping = aes(x = value
+                                 ),
+                   stat = "count",
+                   fill = "grey"
+             ) +
+    xlab("\nbinarized AUC score") +
+    ylab("Count\n") +
+    theme_bw()
+
+```
+
+#### Filtering
+
+```{r AUC_bin_filtering}
+
+# Remove all lines where counts are all equal to zero
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ <- scRNAseq_INI254_scenic_auc_matrix_bin_t[apply(X = scRNAseq_INI254_scenic_auc_matrix_bin_t,
+                                                                                            MARGIN = 1,
+                                                                                            FUN = function(x) !all(x==0)),
+                                                                                      ]
+
+dim(scRNAseq_INI254_scenic_auc_matrix_bin_t)
+dim(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ)
+
+# Filtering
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt <- expFilter(data      = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ,
+                                                             threshold = 0.5,
+                                                             p         = 0.05,
+                                                             graph     = TRUE
+                                                             )
+
+dim(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt)
+
+```
+
+#### Heatmap of AUC_BIN score
+
+```{r SCENIC_AUC_BINscore_heatmap}
+
+# Most variable genes
+mvRegulons_auc_bin <- genes.selection(data      = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt,
+                                      thres.num = 50
+                                      )
+
+# Subset matrix
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons <- scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt[mvRegulons_auc_bin,]
+
+# Check order
+all(rownames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data) == colnames(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons))
+
+# Define heatmap color
+col_fun = colorRamp2(breaks = c(0,1), colors = c("white","black"))
+
+# Heatmap
+h <- Heatmap(matrix                      = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons,
+             clustering_distance_rows    = "binary",
+             clustering_method_rows      = "ward",
+             cluster_rows                = TRUE,
+             cluster_columns             = FALSE,
+             show_row_names              = TRUE,
+             show_row_dend               = FALSE,
+             show_column_names           = FALSE,
+             column_title                = "cells",
+             row_title                   = "Top 50 most variable regulons",
+             top_annotation              = topAnnot_PCmin,
+             column_dend_height          = unit(40, "mm"),
+             column_order                = order(factor(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data[,"RNA_snn_res.0.2"])),
+             column_split                = factor(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data[,"RNA_snn_res.0.2"]),
+             #row_split                   = 2,
+             col                         = col_fun,
+             show_heatmap_legend         = FALSE
+             )
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_SCENIC_AUCbinScore.pdf"), width = 12, height = 12)
+draw(h)
+#dev.off()
+
+```
+
+#### Heatmap of the percentage of cells with activated regulon
+
+```{r heatmap_perc_active_regulon}
+
+# Melt matrix
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt <- melt(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons)
+colnames(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt) <- c("regulon","cellID","AUCbin")
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt)
+
+# Merge matrix and meta data
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus <- merge(x     = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust@meta.data["RNA_snn_res.0.2"],
+                                                                              y     = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt,
+                                                                              by.x  = 0,
+                                                                              by.y  = "cellID",
+                                                                              all   = FALSE
+                                                                              )
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus)
+
+# Create table of cluster, regulon and number of cells
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells <- group_by(.data = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus,
+                                                                                          RNA_snn_res.0.2,
+                                                                                          regulon
+                                                                                          ) %>%
+    summarise(number =  n())
+colnames(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells) = c("cluster","regulon","nbCell")
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells)
+
+# Create table of cluster, regulon and number of cells in which regulon is activated
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells <- filter(.data = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus, AUCbin == 1) %>%
+    group_by(RNA_snn_res.0.2,
+             regulon
+             ) %>%
+    summarise(number =  n())
+colnames(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells) = c("cluster","regulon","nbCell_AUCbin1")
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells)
+
+# Create a table of total number of cells and cells in which regulon is activated
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells <- merge(x = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells,
+                                                                                                   y = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells,
+                                                                                                   by = c("cluster","regulon"),
+                                                                                                   all = FALSE
+                                                                                                   )
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells)
+
+# Compute percentage of cells with active regulon
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$activeRegulon <- scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$nbCell_AUCbin1*100/scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$nbCell
+
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells)
+
+# Transform table to matrix (for ComplexHeatmap function)
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix <- spread(data = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells[,c("cluster","regulon","activeRegulon")],
+                                                                                                 key = cluster,
+                                                                                                 value = activeRegulon
+                                                                                                 )
+rownames(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix) <- scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix$regulon
+scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix$regulon <- NULL
+head(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix)
+
+
+
+# Top annotation
+topAnnot_cluster <- HeatmapAnnotation(cluster                  = colnames(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix),
+                                      text                     = anno_text(x= colnames(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix), rot = 0),
+                                      col                      = list(cluster = cluster_n8_col),
+                                      gap                      = unit(4,"mm"),
+                                      show_annotation_name     = FALSE,
+                                      annotation_name_gp       = gpar(fontsize = 20),
+                                      annotation_legend_param  = list(fontsize   = 20,
+                                                                      title_gp    = gpar(fontsize = 20, font = 2),
+                                                                      labels_gp   = gpar(fontsize = 20),
+                                                                      grid_width  = unit(12,"mm"),
+                                                                      grid_height = unit(12,"mm"),
+                                                                      ncol        = 1
+                                                                      ),
+                                      simple_anno_size        = unit(2,"cm"),
+                                      na_col                  = "white",
+                                      show_legend             = FALSE
+                                      )
+
+# Heatmap
+h <- Heatmap(matrix                    = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix,
+             cluster_columns           = FALSE,
+             clustering_distance_rows  = "euclidean",
+             clustering_method_rows    = "average",
+             top_annotation            = topAnnot_cluster,
+             show_row_dend             = FALSE,
+             column_title              = "cluster\n",
+             row_title                 = "Top 50 most variable regulons",
+             column_split              = colnames(MX_plus),
+             show_column_names         = FALSE,
+             heatmap_legend_param        = list(color_bar      = "continuous",
+                                                grid_width     = unit(2,"cm"),
+                                                grid_height    = unit(2,"cm"),
+                                                legend_width   = unit(20,"cm"),
+                                                title          = "\n% of cells with active regulon",
+                                                title_gp       = gpar(fontsize = 20),
+                                                legend_gp      = gpar(fontsize = 20),
+                                                title_position = "topcenter",
+                                                direction = "horizontal"
+                                                )
+             )
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_SCENIC_AUCbinScore_perc.pdf"), width = 12, height = 12)
+draw(h,
+     heatmap_legend_side = "bottom"
+     )
+#dev.off()
+
+```
+
+### Cell type specific regulators
+
+#### Import SCENIC RSS score
+
+```{r import_SCENIC_AUCscore}
+
+# Import SCENIC RSS score
+scRNAseq_INI254_scenic_rss_matrix <- read.csv(file = paste0(pathToSCENICresult,"scRNAseq_INI254_scenic_rss_matrix.csv"))
+head(scRNAseq_INI254_scenic_rss_matrix)
+dim(scRNAseq_INI254_scenic_rss_matrix)
+
+# Create column of cluster
+scRNAseq_INI254_scenic_rss_matrix$cluster <- rownames(scRNAseq_INI254_scenic_rss_matrix)
+head(scRNAseq_INI254_scenic_rss_matrix)
+
+# Density distribution
+scRNAseq_INI254_scenic_rss_matrix_melt <- melt(scRNAseq_INI254_scenic_rss_matrix)
+head(scRNAseq_INI254_scenic_rss_matrix_melt)
+
+ggplot(data = scRNAseq_INI254_scenic_auc_matrix_bin_t_melt) +
+    geom_density(mapping = aes(x = value),
+                   fill = "grey"
+             ) +
+    xlab("\nRSS score") +
+    ylab("density\n") +
+    theme_bw()
+
+# Convert variable column (regulon) into factor
+scRNAseq_INI254_scenic_rss_matrix_melt$variable <- factor(scRNAseq_INI254_scenic_rss_matrix_melt$variable)
+
+head(scRNAseq_INI254_scenic_rss_matrix_melt)
+
+# Plot RSS per cluster
+scRNAseq_INI254_scenic_rss_plot_list = list()
+for (cluster in levels(factor(scRNAseq_INI254_scenic_rss_matrix_melt$cluster)))
+{
+    # Select cluster 
+    f <- scRNAseq_INI254_scenic_rss_matrix_melt[which(scRNAseq_INI254_scenic_rss_matrix_melt$cluster == cluster),]
+    # Pick top 5 regulons
+    top5 <- f[order(f$value, decreasing = TRUE),] %>% .[1:5,"variable"]
+    # Plot RSS for each regulon
+    p <- ggplot(data = f,
+                mapping = aes(x = reorder(variable,-value),
+                              y = value
+                              )
+                ) +
+        ggtitle(cluster) +
+        xlab("regulon") +
+        ylab("RSS score") +
+        geom_point(color = "blue") +
+        geom_point(data = filter(f, variable %in% top5),
+                   color = "red",
+                   size = 2
+                   ) + 
+        geom_text_repel(data = filter(f, variable %in% top5),
+                        mapping = aes(label = variable),
+                        color = "red",
+                        size = 5
+                        ) + 
+        theme_bw() +
+        theme(text = element_text(size = 20),
+              axis.ticks.x = element_blank(),
+              axis.text.x = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              plot.title = element_text(hjust = 0.5, face = "bold", size = 30)
+              )
+    # Append list of plot
+    scRNAseq_INI254_scenic_rss_plot_list[[length(scRNAseq_INI254_scenic_rss_plot_list)+1]] <- p
+}
+
+library(ggpubr)
+
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_SCENIC_RSS.pdf"), width = 16, height = 12)
+ggarrange(plotlist = scRNAseq_INI254_scenic_rss_plot_list)
+#dev.off()
+
+```
+
+
+
+# Clustering (Using PCmin=50)
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50 <- FindNeighbors(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA,
+                                                                             dims = 1:50
+                                                                             )
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50 <- FindClusters(object     = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+                                                                       resolution = seq(from  = 0,
+                                                                                        to    = 2,
+                                                                                        by    = 0.1
+                                                                                        )
+                                                                       )      
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_INI254_PC50.rds"
+                        )
+        )
+
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+colnames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data)
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_INI254_PC50.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data,
+         prefix          = "RNA_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE,
+         color           = "red"
+         )
+#dev.off()
+
+choosenResolution <- 0.2
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution <- FindClusters(object     = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+                                                                                              resolution = choosenResolution
+                                                                                              )      
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_INI254_PC50_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution@meta.data
+       ) +
+    stat_count(mapping = aes(x     = RNA_snn_res.0.2,
+                             fill  = Phase
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = RNA_snn_res.0.2,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5#,
+              #fontface     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+# Export meta data (for SCENIC analysis)
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data)
+
+write.table(x      = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data,
+            file   = "scRNAseq_Seurat_INI254_PC50_metaData.txt",
+            sep    = ",",
+            quote  = FALSE
+            )
+
+```
+
+## UMAP
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50 <- RunUMAP(object       = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+                                                                       dims         = 1:50,
+                                                                       n.neighbors  = 30
+                                                                       )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_PC50.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("RNA_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+# UMAP and nb of UMIs
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_PC50_nbUMIs.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "nFeature_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_PC50_nbGenes.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "nCount_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_PC50_nbRNA_per_gene.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "nCount_per_Feature",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_PC50_percMito.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "percent.mito",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and cell cylce phase
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_PC50_cellCyclePhase.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Boxplot of covariates per cluster
+
+```{r umap_and_covariates}
+
+# Boxplot and nb of UMIs
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_PC50_nbUMIs.pdf"), width = 12, height = 12)
+ ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = log10(nCount_RNA),
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = log10(nCount_RNA)
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "log10(UMI count)\n")+
+    ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_PC50_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nFeature_RNA,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nFeature_RNA
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "# genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_PC50_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nCount_per_Feature,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nCount_per_Feature
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "UMIs per gene\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_PC50_percMito.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = percent.mito,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = percent.mito
+                               ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "% mito genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.50
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers <- FindAllMarkers(object            = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution,
+                                                                                 min.pct           = min_pct,
+                                                                                 logfc.threshold   = min_logfc,
+                                                                                 min.diff.pct      = min_diffPct,
+                                                                                 only.pos          = TRUE,
+                                                                                 min.cells.feature = min_cellsFeature
+                                                                                 )
+
+head(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_PC50_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10,
+              face = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_PC50_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution,
+          features = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_PC50_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution,
+          features = nTop_markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=20))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_INI254_PC50_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 20
+scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution.markers,
+            file        = paste0(pathToReport,"scRNAseq_INI254_cluster_PC50_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_PC50_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50,
+            features = "SMARCB1",
+            pt.size  = 1,
+            reduction = "umap"
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = c(0.85,0.85),
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_PC50_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50_choosenResolution,
+        features = "SMARCB1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+icicicicicicici
+
+## SCENIC Analysis (PC50)
+
+### Cellular enrichment of regulons using AUC score
+
+#### Heatmap of AUC score
+
+```{r SCENIC_AUCscore_heatmap}
+
+# Check order
+all(rownames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) == colnames(scRNAseq_INI254_scenic_auc_matrix_t_filt_mvRegulons))
+
+head(colnames(scRNAseq_INI254_PC50_scenic_auc_matrix_t_filt_mvRegulons))
+
+# Top annotation
+topAnnot_PC50 <- HeatmapAnnotation(df                      = data.frame(Cluster = as.character(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data[,"RNA_snn_res.0.2"]), check.names = FALSE),
+                                   col                     = list(Cluster = cluster_n8_col),
+                                   gap                     = unit(2,"mm"),
+                                   show_annotation_name    = TRUE,
+                                   annotation_name_gp      = gpar(fontsize    = 20),
+                                   annotation_legend_param = list(fontsize    = 20,
+                                                                  title_gp    = gpar(fontsize = 20, font = 2),
+                                                                  labels_gp   = gpar(fontsize = 20),
+                                                                  grid_width  = unit(12,"mm"),
+                                                                  grid_height = unit(12,"mm"),
+                                                                  ncol        = 1
+                                                                  ),
+                                   simple_anno_size        = unit(2,"cm"),
+                                   na_col                  = "white",
+                                   show_legend             = TRUE
+                                   )
+
+# Define heatmap color
+col_fun = colorRamp2(breaks = c(0,0.2,0.4,0.6), colors = c("cyan","wheat1","red","darkred"))
+
+# Heatmap
+h <- Heatmap(matrix                      = scRNAseq_INI254_scenic_auc_matrix_t_filt_mvRegulons,
+             clustering_distance_columns = "pearson",
+        clustering_method_columns   = "ward",
+        clustering_distance_rows    = "euclidean",
+        clustering_method_rows      = "ward",
+        cluster_rows                = TRUE,
+        show_row_names              = TRUE,
+        show_column_names           = FALSE,
+        column_title                = "cells",
+        row_title                   = "Top 50 most variable regulons",
+        top_annotation              = topAnnot_PC50,
+        show_heatmap_legend         = TRUE,
+        column_dend_height          = unit(40, "mm"),
+        column_split                = 4,
+        row_split                   = 4,
+        col                         = col_fun,
+heatmap_legend_param        = list(color_bar      = "continuous",
+                                   grid_width     = unit(0.75,"cm"),
+                                   grid_height    = unit(2,"cm"),
+                                   legend_width   = unit(4,"cm"),
+                                   title          = "AUC\n score\n",
+                                   title_gp       = gpar(fontsize = 20),
+                                   legend_gp      = gpar(fontsize = 20),
+                                   title_position = "topcenter"
+                                   )
+)
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_PC50_SCENIC_AUCscore.pdf"), width = 12, height = 12)
+draw(h, heatmap_legend_side = "left")
+#dev.off()
+
+```
+
+#### UMAP of cells based on AUC score
+
+```{r AUCscore_umap}
+
+# Bind meta data
+scRNAseq_INI254_PC50_scenic_auc_umap_plus <- cbind(scRNAseq_INI254_scenic_auc_umap,
+                                              cluster = as.character(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data$RNA_snn_res.0.2)
+                                              )
+
+head(scRNAseq_INI254_PC50_scenic_auc_umap_plus)
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_PC50_SCENIC_AUCscore.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_INI254_PC50_scenic_auc_umap_plus,
+       mapping = aes(x = UMAP1, y = UMAP2)
+       ) +
+    geom_point(mapping = aes(color = cluster
+                             ),
+               size = 2
+               )+
+    xlab("UMAP1") +
+    ylab("UMAP2") +
+    ggtitle(NULL) +
+    theme_bw()+
+    theme(text               = element_text(size = 20),
+          legend.position    = "none"
+          #legend.title       = element_text(face = "bold"),
+          #legend.key.height  = unit(1.5,"cm")
+          )
+#dev.off()
+
+```	
+
+### Cellular enrichment of regulons using binarized AUC score
+
+#### Heatmap of AUC_BIN score
+
+```{r SCENIC_AUC_BINscore_heatmap}
+
+# Check order
+all(rownames(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data) == colnames(scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons))
+
+# Define heatmap color
+col_fun = colorRamp2(breaks = c(0,1), colors = c("white","black"))
+
+# Heatmap
+h <- Heatmap(matrix                      = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons,
+             clustering_distance_rows    = "binary",
+             clustering_method_rows      = "ward",
+             cluster_rows                = TRUE,
+             cluster_columns             = FALSE,
+             show_row_names              = TRUE,
+             show_row_dend               = FALSE,
+             show_column_names           = FALSE,
+             column_title                = "cells",
+             row_title                   = "Top 50 most variable regulons",
+             top_annotation              = topAnnot_PC50,
+             column_dend_height          = unit(40, "mm"),
+             column_order                = order(factor(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data[,"RNA_snn_res.0.2"])),
+             column_split                = factor(scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data[,"RNA_snn_res.0.2"]),
+             #row_split                   = 2,
+             col                         = col_fun,
+             show_heatmap_legend         = FALSE
+             )
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_PC50_SCENIC_AUCbinScore.pdf"), width = 12, height = 12)
+draw(h)
+#dev.off()
+
+```
+
+#### Heatmap of the percentage of cells with activated regulon
+
+```{r heatmap_perc_active_regulon}
+
+# Merge matrix and meta data
+scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus <- merge(x     = scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust_PC50@meta.data["RNA_snn_res.0.2"],
+                                                                                   y     = scRNAseq_INI254_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt,
+                                                                                   by.x  = 0,
+                                                                                   by.y  = "cellID",
+                                                                                   all   = FALSE
+                                                                                   )
+head(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus)
+
+# Create table of cluster, regulon and number of cells
+scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells <- group_by(.data = scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus,
+                                                                                          RNA_snn_res.0.2,
+                                                                                          regulon
+                                                                                          ) %>%
+    summarise(number =  n())
+colnames(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells) = c("cluster","regulon","nbCell")
+head(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells)
+
+# Create table of cluster, regulon and number of cells in which regulon is activated
+scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells <- filter(.data = scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus, AUCbin == 1) %>%
+    group_by(RNA_snn_res.0.2,
+             regulon
+             ) %>%
+    summarise(number =  n())
+colnames(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells) = c("cluster","regulon","nbCell_AUCbin1")
+head(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells)
+
+# Create a table of total number of cells and cells in which regulon is activated
+scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells <- merge(x = scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells,
+                                                                                                   y = scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_allCells,
+                                                                                                   by = c("cluster","regulon"),
+                                                                                                   all = FALSE
+                                                                                                   )
+head(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells)
+
+# Compute percentage of cells with active regulon
+scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$activeRegulon <- scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$nbCell_AUCbin1*100/scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells$nbCell
+
+head(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells)
+
+# Transform table to matrix (for ComplexHeatmap function)
+scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix <- spread(data = scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_melt_plus_activeCells_allCells[,c("cluster","regulon","activeRegulon")],
+                                                                                                 key = cluster,
+                                                                                                 value = activeRegulon
+                                                                                                 )
+rownames(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix) <- scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix$regulon
+scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix$regulon <- NULL
+head(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix)
+
+
+
+# Top annotation
+topAnnot_cluster_PC50 <- HeatmapAnnotation(cluster                  = colnames(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix),
+                                           text                     = anno_text(x= colnames(scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix), rot = 0),
+                                           col                      = list(cluster = cluster_n8_col),
+                                           gap                      = unit(4,"mm"),
+                                           show_annotation_name     = FALSE,
+                                           annotation_name_gp       = gpar(fontsize = 20),
+                                           annotation_legend_param  = list(fontsize   = 20,
+                                                                           title_gp    = gpar(fontsize = 20, font = 2),
+                                                                           labels_gp   = gpar(fontsize = 20),
+                                                                           grid_width  = unit(12,"mm"),
+                                                                           grid_height = unit(12,"mm"),
+                                                                           ncol        = 1
+                                                                           ),
+                                           simple_anno_size        = unit(2,"cm"),
+                                           na_col                  = "white",
+                                           show_legend             = FALSE
+                                           )
+
+# Heatmap
+h <- Heatmap(matrix                    = scRNAseq_INI254_PC50_scenic_auc_matrix_bin_t_WZ_filt_mvRegulons_activeCells_allCells_matrix,
+             cluster_columns           = FALSE,
+             clustering_distance_rows  = "euclidean",
+             clustering_method_rows    = "average",
+             top_annotation            = topAnnot_cluster_PC50,
+             show_row_dend             = FALSE,
+             column_title              = "cluster\n",
+             row_title                 = "Top 50 most variable regulons",
+             column_split              = colnames(MX_plus),
+             show_column_names         = FALSE,
+             heatmap_legend_param        = list(color_bar      = "continuous",
+                                                grid_width     = unit(2,"cm"),
+                                                grid_height    = unit(2,"cm"),
+                                                legend_width   = unit(20,"cm"),
+                                                title          = "\n% of cells with active regulon",
+                                                title_gp       = gpar(fontsize = 20),
+                                                legend_gp      = gpar(fontsize = 20),
+                                                title_position = "topcenter",
+                                                direction = "horizontal"
+                                                )
+             )
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_PC50_SCENIC_AUCbinScore_perc.pdf"), width = 12, height = 12)
+draw(h,
+     heatmap_legend_side = "bottom"
+     )
+#dev.off()
+
+```
+
+### Cell type specific regulators
+
+#### Import SCENIC RSS score
+
+```{r import_SCENIC_AUCscore}
+
+# Import SCENIC RSS score
+scRNAseq_INI254_PC50_scenic_rss_matrix <- read.csv(file = paste0(pathToSCENICresult,"scRNAseq_INI254_PC50_scenic_rss_matrix.csv"))
+head(scRNAseq_INI254_PC50_scenic_rss_matrix)
+dim(scRNAseq_INI254_PC50_scenic_rss_matrix)
+
+# Create column of cluster
+scRNAseq_INI254_PC50_scenic_rss_matrix$cluster <- rownames(scRNAseq_INI254_PC50_scenic_rss_matrix)
+head(scRNAseq_INI254_PC50_scenic_rss_matrix)
+
+# Density distribution
+scRNAseq_INI254_PC50_scenic_rss_matrix_melt <- melt(scRNAseq_INI254_PC50_scenic_rss_matrix)
+head(scRNAseq_INI254_PC50_scenic_rss_matrix_melt)
+
+ggplot(data = scRNAseq_INI254_PC50_scenic_rss_matrix_melt) +
+    geom_density(mapping = aes(x = value),
+                   fill = "grey"
+             ) +
+    xlab("\nRSS score") +
+    ylab("density\n") +
+    theme_bw()
+
+# Convert variable column (regulon) into factor
+scRNAseq_INI254_PC50_scenic_rss_matrix_melt$variable <- factor(scRNAseq_INI254_PC50_scenic_rss_matrix_melt$variable)
+
+head(scRNAseq_INI254_PC50_scenic_rss_matrix_melt)
+
+# Plot RSS per cluster
+scRNAseq_INI254_PC50_scenic_rss_plot_list = list()
+for (cluster in levels(factor(scRNAseq_INI254_PC50_scenic_rss_matrix_melt$cluster)))
+{
+    # Select cluster 
+    f <- scRNAseq_INI254_PC50_scenic_rss_matrix_melt[which(scRNAseq_INI254_PC50_scenic_rss_matrix_melt$cluster == cluster),]
+    # Pick top 5 regulons
+    top5 <- f[order(f$value, decreasing = TRUE),] %>% .[1:5,"variable"]
+    # Plot RSS for each regulon
+    p <- ggplot(data = f,
+                mapping = aes(x = reorder(variable,-value),
+                              y = value
+                              )
+                ) +
+        ggtitle(cluster) +
+        xlab("regulon") +
+        ylab("RSS score") +
+        geom_point(color = "blue") +
+        geom_point(data = filter(f, variable %in% top5),
+                   color = "red",
+                   size = 2
+                   ) + 
+        geom_text_repel(data = filter(f, variable %in% top5),
+                        mapping = aes(label = variable),
+                        color = "red",
+                        size = 5
+                        ) + 
+        theme_bw() +
+        theme(text = element_text(size = 20),
+              axis.ticks.x = element_blank(),
+              axis.text.x = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              plot.title = element_text(hjust = 0.5, face = "bold", size = 30)
+              )
+    # Append list of plot
+    scRNAseq_INI254_PC50_scenic_rss_plot_list[[length(scRNAseq_INI254_PC50_scenic_rss_plot_list)+1]] <- p
+}
+
+library(ggpubr)
+
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_PC50_SCENIC_RSS.pdf"), width = 16, height = 12)
+ggarrange(plotlist = scRNAseq_INI254_PC50_scenic_rss_plot_list)
+#dev.off()
+
+```
+
+icicicicicicicicicicicici
+
+# Annotate cells with integrated cluster number
+
+## Import integrated meta data
+
+```{r import_integrated_metadata}
+
+# Import metadata
+integrated_cellAnnot_metaData <- read.csv(file = "scRNAseq_Seurat_integrated_cellAnnot_metaData.csv")
+head(integrated_cellAnnot_metaData)
+
+integrated_cellAnnot_metaData_INI254 <- filter(.data = integrated_cellAnnot_metaData,
+                                               orig.ident == "INI254"
+                                               ) %>%
+    dplyr::select(X,integrated_snn_res.0.2,cell_type,cell_subtype)
+
+head(integrated_cellAnnot_metaData_INI254)
+
+integrated_cellAnnot_metaData_INI254$integrated_snn_res.0.2 <- factor(integrated_cellAnnot_metaData_INI254$integrated_snn_res.0.2)
+
+# Remove _2 from integrated cell barcode
+integrated_cellAnnot_metaData_INI254$X <- gsub(pattern = "\\_1", replacement = "", integrated_cellAnnot_metaData_INI254$X)
+
+# 
+scRNAseq_Seurat_INI254_plus <- scRNAseq_Seurat_INI254_nbGenes_percMito_norm_PCA_clust
+
+head(scRNAseq_Seurat_INI254_plus@meta.data)
+
+# Add integrated cluster to metadata
+scRNAseq_Seurat_INI254_plus@meta.data <- left_join(x = mutate(scRNAseq_Seurat_INI254_plus@meta.data,
+                                                              cellBarcode = rownames(scRNAseq_Seurat_INI254_plus@meta.data)
+                                                             ),
+                                                   y = integrated_cellAnnot_metaData_INI254,
+                                                   by = c("cellBarcode" = "X")
+                                               )
+
+head(scRNAseq_Seurat_INI254_plus@meta.data)
+
+scRNAseq_Seurat_INI254_plus@meta.data <- column_to_rownames(.data = scRNAseq_Seurat_INI254_plus@meta.data,
+                                                            var = "cellBarcode"
+                                                            )
+
+DimPlot(scRNAseq_Seurat_INI254_plus,
+        group.by = "RNA_snn_res.0.2"
+        )
+
+DimPlot(scRNAseq_Seurat_INI254_plus,
+        group.by = "cell_type"
+        )
+
+```
+
+# Trajectory Inference analysis
+
+## Monocle version 3 method
+
+### Monocle on all clusters (using mvGenes)
+
+```{r monocle_method}
+
+# Extract scaled matrix
+scRNAseq_Seurat_INI254_scaled_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_INI254_plus,
+                                                               slot = "scale.data"
+                                                               )
+                                                  )
+head(scRNAseq_Seurat_INI254_scaled_matrix[,1:3])
+
+# Get HVF
+scRNAseq_Seurat_INI254_mvGenes <- HVFInfo(object = scRNAseq_Seurat_INI254_plus,
+                                          selection.method = "vst"
+                                          )
+head(scRNAseq_Seurat_INI254_mvGenes)
+nrow(scRNAseq_Seurat_INI254_mvGenes)
+
+# Get most variable genes
+scRNAseq_Seurat_INI254_mvGenes[order(scRNAseq_Seurat_INI254_mvGenes$variance.standardized, decreasing = TRUE),] %>% .[1:nFeatures,] -> mvGenes
+
+# Subset matrix
+scRNAseq_Seurat_INI254_scaled_matrix_mvGenes <- scRNAseq_Seurat_INI254_scaled_matrix[as.vector(rownames(mvGenes)),]
+nrow(scRNAseq_Seurat_INI254_scaled_matrix_mvGenes)
+
+head(scRNAseq_Seurat_INI254_scaled_matrix_mvGenes[,1:4])
+dim(scRNAseq_Seurat_INI254_scaled_matrix_mvGenes)
+
+# Create cds object
+scRNAseq_Seurat_INI254_cds <- new_cell_data_set(expression_data = as.matrix(scRNAseq_Seurat_INI254_scaled_matrix_mvGenes, Class = "sparseMatrix"),
+                                                cell_metadata = data.frame(scRNAseq_Seurat_INI254_plus@meta.data),
+                                                gene_metadata = data.frame(gene_short_name = row.names(scRNAseq_Seurat_INI254_scaled_matrix_mvGenes),
+                                                                           row.names = row.names(scRNAseq_Seurat_INI254_scaled_matrix_mvGenes)
+                                                                           )
+                                                )
+
+
+nbPCs <- c(10,PCmin,30,50,70,90)
+scRNAseq_Seurat_INI254_cds_list <- list()
+for (nbPC in nbPCs)
+{
+# Pre-process pseudotime
+scRNAseq_Seurat_INI254_cds <- preprocess_cds(cds           = scRNAseq_Seurat_INI254_cds,
+                                                 num_dim       = nbPC,
+                                                 method        = "PCA",
+                                                 norm_method   = "none",
+                                                 pseudo_count  = 0
+                                                 )
+# Reduce dimension
+scRNAseq_Seurat_INI254_cds <- reduce_dimension(cds               = scRNAseq_Seurat_INI254_cds,
+                                                   max_components    = 2,
+                                                   reduction_method  = "UMAP"
+                                                   )
+# Map pseudotime
+scRNAseq_Seurat_INI254_cds <- cluster_cells(cds               = scRNAseq_Seurat_INI254_cds,
+                                                reduction_method  = "UMAP"
+                                                )
+scRNAseq_Seurat_INI254_cds <- learn_graph(cds = scRNAseq_Seurat_INI254_cds,
+                                              close_loop          = TRUE,
+                                              learn_graph_control = list(minimal_branch_len        = 2.5,
+                                                                         prune_graph               = TRUE,
+                                                                         rann.k                    = NULL
+                                                                         )
+                                              )
+    scRNAseq_Seurat_INI254_cds_list[[length(scRNAseq_Seurat_INI254_cds_list)+1]] <- scRNAseq_Seurat_INI254_cds
+}
+
+# Rename each cds object in the list
+names(scRNAseq_Seurat_INI254_cds_list) <- c("PC10","PCmin","PC30","PC50","PC70","PC90")
+
+# Create plot list
+scRNAseq_Seurat_INI254_cds_plot_list <- list()
+for (i in 1:length(scRNAseq_Seurat_INI254_cds_list))
+{
+# Plot
+scRNAseq_Seurat_INI254_cds_plot <- plot_cells(cds                            = scRNAseq_Seurat_INI254_cds_list[[i]],
+                                              color_cells_by                 = "integrated_snn_res.0.2",
+                                        #group_cells_by                 = "cell_type",
+                                              cell_size                      = 1,
+                                              trajectory_graph_color         = "black",
+                                              trajectory_graph_segment_size  = 2,
+                                              label_branch_points = FALSE,
+                                              label_cell_groups = FALSE,
+                                              label_leaves = FALSE
+                                              ) +
+    ggtitle(names(scRNAseq_Seurat_INI254_cds_list)[i])
+scRNAseq_Seurat_INI254_cds_plot_list[[length(scRNAseq_Seurat_INI254_cds_plot_list)+1]] <- scRNAseq_Seurat_INI254_cds_plot
+}
+
+library(gridExtra)
+
+#pdf(file = paste0(pathToFigures,"monocle_scRNAseq_INI254_allClusters_list.pdf"), width = 20, height = 10)
+do.call("grid.arrange", c(scRNAseq_Seurat_INI254_cds_plot_list, ncol = 3))
+#dev.off()
+
+```
+
+
+#### Monocle on cluster 0, 1, 3 and 5 (using DEG)
+
+```{r monocle_method}
+
+# Subset Seurat object with cluster markers
+scRNAseq_Seurat_INI254_0135 <- subset(x = scRNAseq_Seurat_INI254_plus,
+                                      integrated_snn_res.0.2 %in% c(0,1,3,5)
+                                      )
+nrow(scRNAseq_Seurat_INI254_0135)
+
+# Extract scaled matrix
+scRNAseq_Seurat_INI254_0135_scaled_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_INI254_0135,
+                                                                    slot = "scale.data"
+                                                                    )
+                                                       )
+head(scRNAseq_Seurat_INI254_0135_scaled_matrix[,1:3])
+
+# Get HVF
+scRNAseq_Seurat_INI254_0135_mvGenes <- HVFInfo(object = scRNAseq_Seurat_INI254_0135,
+                                               selection.method = "vst"
+                                               )
+head(scRNAseq_Seurat_INI254_0135_mvGenes)
+nrow(scRNAseq_Seurat_INI254_0135_mvGenes)
+
+# Get most variable genes
+scRNAseq_Seurat_INI254_0135_mvGenes[order(scRNAseq_Seurat_INI254_0135_mvGenes$variance.standardized, decreasing = TRUE),] %>% .[1:nFeatures,] -> mvGenes
+
+# Subset matrix
+scRNAseq_Seurat_INI254_0135_scaled_matrix_mvGenes <- scRNAseq_Seurat_INI254_0135_scaled_matrix[as.vector(rownames(mvGenes)),]
+nrow(scRNAseq_Seurat_INI254_0135_scaled_matrix_mvGenes)
+
+head(scRNAseq_Seurat_INI254_0135_scaled_matrix_mvGenes[,1:4])
+dim(scRNAseq_Seurat_INI254_0135_scaled_matrix_mvGenes)
+
+
+# Create cds object
+scRNAseq_Seurat_INI254_cds_0135 <- new_cell_data_set(expression_data = scRNAseq_Seurat_INI254_0135_scaled_matrix_mvGenes,
+                                                         cell_metadata = data.frame(scRNAseq_Seurat_INI254_0135@meta.data),
+                                                         gene_metadata = data.frame(gene_short_name = row.names(scRNAseq_Seurat_INI254_0135_scaled_matrix_mvGenes),
+                                                                                    row.names = row.names(scRNAseq_Seurat_INI254_0135_scaled_matrix_mvGenes)
+                                                                                    )
+                                                         )
+
+# Process data
+nbPCs <- c(10,12,30,50,70,90)
+scRNAseq_Seurat_INI254_cds_0135_list <- list()
+for (nbPC in nbPCs)
+{
+# Pre-process pseudotime
+scRNAseq_Seurat_INI254_cds_0135 <- preprocess_cds(cds           = scRNAseq_Seurat_INI254_cds_0135,
+                                                      num_dim       = nbPC,
+                                                      scaling       = TRUE,
+                                                      method        = "PCA",
+                                                      norm_method   = "none",
+                                                      pseudo_count  = 0
+                                                      )
+# Correct batch effect
+#scRNAseq_Seurat_INI254_cds_0135 <- align_cds(cds = scRNAseq_Seurat_INI254_cds_0135,
+ #                                                alignment_group = "orig.ident"
+  #                                               )
+# Reduce dimension
+scRNAseq_Seurat_INI254_cds_0135 <- reduce_dimension(cds               = scRNAseq_Seurat_INI254_cds_0135,
+                                                        max_components    = 2,
+                                                        reduction_method  = "UMAP"
+                                                        )
+# Map pseudotime
+    scRNAseq_Seurat_INI254_cds_0135 <- cluster_cells(cds               = scRNAseq_Seurat_INI254_cds_0135,
+                                                         reduction_method  = "UMAP"
+                                                         )
+    scRNAseq_Seurat_INI254_cds_0135 <- learn_graph(cds = scRNAseq_Seurat_INI254_cds_0135,
+                                                        close_loop          = FALSE,
+                                                        learn_graph_control = list(minimal_branch_len        = 2.5,
+                                                                                   prune_graph               = TRUE,
+                                                                                   rann.k                    = NULL
+                                                                                   )
+                                                        )
+    scRNAseq_Seurat_INI254_cds_0135_list[[length(scRNAseq_Seurat_INI254_cds_0135_list)+1]] <- scRNAseq_Seurat_INI254_cds_0135
+}
+
+# Rename each cds object in the list
+names(scRNAseq_Seurat_INI254_cds_0135_list) <- c("PC10","PCmin","PC30","PC50","PC70","PC90")
+
+# Create plot list
+scRNAseq_Seurat_INI254_cds_0135_plot_list <- list()
+for (i in 1:length(scRNAseq_Seurat_INI254_cds_0135_list))
+{
+# Plot
+scRNAseq_Seurat_INI254_cds_0135_plot <- plot_cells(cds                            = scRNAseq_Seurat_INI254_cds_0135_list[[i]],
+                                                       color_cells_by                 = "integrated_snn_res.0.2",
+                                        #group_cells_by                 = "cell_type",
+                                                       cell_size                      = 1,
+                                                       trajectory_graph_color         = "black",
+                                                       trajectory_graph_segment_size  = 2,
+                                                       label_cell_groups = FALSE,
+                                                       label_branch_points = FALSE,
+                                                       label_leaves = FALSE
+                                                  ) +
+    ggtitle(names(scRNAseq_Seurat_INI254_cds_0135_list)[i])
+    scRNAseq_Seurat_INI254_cds_0135_plot_list[[length(scRNAseq_Seurat_INI254_cds_0135_plot_list)+1]] <- scRNAseq_Seurat_INI254_cds_0135_plot
+}
+
+#pdf(file = paste0(pathToFigures,"monocle_scRNAseq_INI254_clust0135_list.pdf"), width = 18, height = 12)
+do.call("grid.arrange", c(scRNAseq_Seurat_INI254_cds_0135_plot_list, ncol = 2))
+#dev.off()
+
+# Plot trajectory
+#pdf(file = paste0(pathToFigures,"monocle_scRNAseq_INI254_clust0135.pdf"), width = 20, height = 10)
+plot_cells(cds                            = scRNAseq_Seurat_INI254_cds_0135_list[["PCmin"]],
+           color_cells_by                 = "integrated_snn_res.0.2",
+           cell_size                      = 1,
+           trajectory_graph_color         = "black",
+           trajectory_graph_segment_size  = 2,
+           label_cell_groups              = FALSE,
+           label_branch_points            = FALSE,
+           label_roots                    = TRUE,
+           label_leaves                   = TRUE
+           ) +
+    theme(text = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+## CytoTRACE method
+
+CytoTRACE predicts the differentiation state of cells using gene Counts and expression.
+
+### CytoTRACE all clusters
+
+```{r cytoTrace}
+
+# Extract expression matrix
+scRNAseq_Seurat_INI254_rawCounts_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_INI254_plus,
+                                                                      assay = "RNA",#"integrated",
+                                                                      slot = "counts"#"scale.data"
+                                                                      )
+                                                         )
+
+nrow(scRNAseq_Seurat_INI254_rawCounts_matrix)
+head(scRNAseq_Seurat_INI254_rawCounts_matrix[,1:4])
+
+# Run CytoTRACE
+scRNAseq_Seurat_INI254_cytoTrace <- CytoTRACE(scRNAseq_Seurat_INI254_rawCounts_matrix)
+str(scRNAseq_Seurat_INI254_cytoTrace)
+
+# Distribution of CytoTRACE score
+#pdf(file = paste0(pathToFigures,"density_scRNAseq_INI254_clust_CytoTRACE.pdf"), width = 14, height = 10)
+ggplot(data = data.frame(CytoTRACE = scRNAseq_Seurat_INI254_cytoTrace$CytoTRACE)
+       ) +
+    geom_density(mapping = aes(CytoTRACE)
+                 ) +
+    theme_bw() +
+    theme(text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Check order
+all(rownames(scRNAseq_Seurat_INI254_plus@meta.data) == rownames(data.frame(CytoTRACE = scRNAseq_Seurat_INI254_cytoTrace$CytoTRACE)))
+
+scRNAseq_Seurat_INI254_allGenes <- scRNAseq_Seurat_INI254_plus
+
+# Append metadata with CytoTRACE
+scRNAseq_Seurat_INI254_allGenes <- AddMetaData(object = scRNAseq_Seurat_INI254_allGenes,
+                                               metadata = data.frame(CytoTRACE = scRNAseq_Seurat_INI254_cytoTrace$CytoTRACE)
+                                               )
+
+colnames(scRNAseq_Seurat_INI254_allGenes@meta.data)
+
+# Check order
+all(rownames(scRNAseq_Seurat_INI254_allGenes[["umap"]]@cell.embeddings) == rownames(scRNAseq_Seurat_INI254_allGenes@meta.data))
+
+# Extract UMAP embeddings
+scRNAseq_Seurat_INI254_umap_coord <- data.frame(scRNAseq_Seurat_INI254_allGenes[["umap"]]@cell.embeddings)
+head(scRNAseq_Seurat_INI254_umap_coord)
+
+# Append metadata with UMAP embeddings
+scRNAseq_Seurat_INI254_allGenes <- AddMetaData(object = scRNAseq_Seurat_INI254_allGenes,
+                                               metadata = scRNAseq_Seurat_INI254_umap_coord
+                                               )
+
+# Plot UMAP embedding with CytoTRACE score
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_CytoTRACE.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_allGenes@meta.data
+       ) +
+    geom_point(mapping = aes(x = UMAP_1,
+                             y = UMAP_2,
+                             color = CytoTRACE
+                             ),
+               size = 2
+               ) +
+    scale_color_gradientn(colours = c("red","yellow","grey","cyan","blue")) +
+    theme_bw() +
+    labs(colour = "Score") +
+    theme(text            = element_text(size = 40),
+          legend.key.height = unit(1.5,'cm')
+          )
+#dev.off()
+
+# Plot UMAP embedding and cluster
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_clust_CytoTRACE_clust.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_allGenes@meta.data
+       ) +
+    geom_point(mapping = aes(x = UMAP_1,
+                             y = UMAP_2,
+                             color = integrated_snn_res.0.2
+                             ),
+               size = 2
+               ) +
+    labs(colour = "Cluster") +
+    theme_bw() +
+    theme(text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot of CytoTRACE score for each cluster 
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_clust_CytoTRACE.pdf"), width = 16, height = 10)
+boxplot_cluster_and_covariate(scRNAseq_Seurat_INI254_allGenes,
+                              clustering  = "integrated_snn_res.0.2",
+                              covariate   = "CytoTRACE",
+                              ylab        = "CytoTRACE\n(0.0: more diff. - 1.0: less diff.)",
+                              reorder     = "median"
+                              )
+#dev.off()
+
+# Genes correlated with CytoTRACE
+scRNAseq_Seurat_INI254_cytoGenes <- data.frame(corr = scRNAseq_Seurat_INI254_cytoTrace$cytoGenes)
+scRNAseq_Seurat_INI254_cytoGenes <- rownames_to_column(scRNAseq_Seurat_INI254_cytoGenes, var = "gene")
+head(scRNAseq_Seurat_INI254_cytoGenes)
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_clust_CytoGenes.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_cytoGenes[c(1:5,(nrow(scRNAseq_Seurat_INI254_cytoGenes)-5):nrow(scRNAseq_Seurat_INI254_cytoGenes)),]
+       ) +
+    geom_bar(mapping = aes(x = reorder(gene, corr), y = corr, fill = corr),
+             stat = "identity"
+             ) +
+    scale_fill_gradientn(colours = c("red","yellow","grey","cyan","blue")) +
+    coord_flip() +
+    xlab("Gene\n") +
+    ylab("\ncorrelation with CytoTRACE") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+### CytoTRACE 0135
+
+```{r cytoTrace}
+
+# Extract expression matrix
+scRNAseq_Seurat_INI254_0135_rawCounts_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_INI254_0135,
+                                                                       assay = "RNA",#"integrated",
+                                                                       slot = "counts"#"scale.data"
+                                                                       )
+                                                          )
+head(scRNAseq_Seurat_INI254_0135_rawCounts_matrix[,1:4])
+nrow(scRNAseq_Seurat_INI254_0135_rawCounts_matrix)
+
+# Run CytoTRACE
+scRNAseq_Seurat_INI254_0135_cytoTrace <- CytoTRACE(scRNAseq_Seurat_INI254_0135_rawCounts_matrix)
+str(scRNAseq_Seurat_INI254_0135_cytoTrace)
+
+# Distribution of CytoTRACE score
+#pdf(file = paste0(pathToFigures,"density_scRNAseq_INI254_0135_clust_CytoTRACE.pdf"), width = 14, height = 10)
+ggplot(data = data.frame(CytoTRACE = scRNAseq_Seurat_INI254_0135_cytoTrace$CytoTRACE)
+       ) +
+    geom_density(mapping = aes(CytoTRACE)
+                 ) +
+    theme_bw() +
+    theme(text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Check order
+all(rownames(scRNAseq_Seurat_INI254_0135@meta.data) == rownames(data.frame(CytoTRACE = scRNAseq_Seurat_INI254_0135_cytoTrace$CytoTRACE)))
+
+# Append metadata with CytoTRACE
+scRNAseq_Seurat_INI254_0135 <- AddMetaData(object = scRNAseq_Seurat_INI254_0135,
+                                           metadata = data.frame(CytoTRACE = scRNAseq_Seurat_INI254_0135_cytoTrace$CytoTRACE)
+                                           )
+
+colnames(scRNAseq_Seurat_INI254_0135@meta.data)
+
+# Check order
+all(rownames(scRNAseq_Seurat_INI254_0135[["umap"]]@cell.embeddings) == rownames(scRNAseq_Seurat_INI254_0135@meta.data))
+
+# Extract UMAP embeddings
+scRNAseq_Seurat_INI254_0135_umap_coord <- data.frame(scRNAseq_Seurat_INI254_0135[["umap"]]@cell.embeddings)
+head(scRNAseq_Seurat_INI254_0135_umap_coord)
+
+# Append metadata with UMAP embeddings
+scRNAseq_Seurat_INI254_0135 <- AddMetaData(object = scRNAseq_Seurat_INI254_0135,
+                                           metadata = scRNAseq_Seurat_INI254_0135_umap_coord
+                                           )
+
+# Plot UMAP embedding with CytoTRACE score
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_0135_clust_CytoTRACE.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_0135@meta.data
+       ) +
+    geom_point(mapping = aes(x = UMAP_1,
+                             y = UMAP_2,
+                             color = CytoTRACE
+                             ),
+               size = 2
+               ) +
+    scale_color_gradientn(colours = c("red","yellow","grey","cyan","blue")) +
+    theme_bw() +
+    labs(colour = "Score") +
+    theme(text            = element_text(size = 40),
+          legend.key.height = unit(1.5,'cm')
+          )
+#dev.off()
+
+# Plot UMAP embedding and cluster
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_0135_clust_CytoTRACE_clust.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_0135@meta.data
+       ) +
+    geom_point(mapping = aes(x = UMAP_1,
+                             y = UMAP_2,
+                             color = integrated_snn_res.0.2
+                             ),
+               size = 2
+               ) +
+    labs(colour = "Cluster") +
+    theme_bw() +
+    theme(text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot of CytoTRACE score for each cluster 
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_INI254_0135_clust_CytoTRACE.pdf"), width = 16, height = 10)
+boxplot_cluster_and_covariate(scRNAseq_Seurat_INI254_0135,
+                              clustering  = "integrated_snn_res.0.2",
+                              covariate   = "CytoTRACE",
+                              ylab        = "CytoTRACE\n(0.0: more diff. - 1.0: less diff.)",
+                              reorder     = "median"
+                              )
+#dev.off()
+
+# Genes correlated with CytoTRACE
+scRNAseq_Seurat_INI254_0135_cytoGenes <- data.frame(corr = scRNAseq_Seurat_INI254_0135_cytoTrace$cytoGenes)
+scRNAseq_Seurat_INI254_0135_cytoGenes <- rownames_to_column(scRNAseq_Seurat_INI254_0135_cytoGenes, var = "gene")
+head(scRNAseq_Seurat_INI254_0135_cytoGenes)
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_0135_clust_CytoGenes.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_0135_cytoGenes[c(1:5,(nrow(scRNAseq_Seurat_INI254_0135_cytoGenes)-5):nrow(scRNAseq_Seurat_INI254_0135_cytoGenes)),]
+       ) +
+    geom_bar(mapping = aes(x = reorder(gene, corr), y = corr, fill = corr),
+             stat = "identity"
+             ) +
+    scale_fill_gradientn(colours = c("red","yellow","grey","cyan","blue")) +
+    coord_flip() +
+    xlab("Gene\n") +
+    ylab("\ncorrelation with CytoTRACE") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

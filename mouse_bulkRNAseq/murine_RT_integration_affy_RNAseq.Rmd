@@ -1,0 +1,1316 @@
+---
+title: "Rhabdoid tumors in mouse model - Integration of RNA-seq and affy data"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    fig_width: 9
+    fig_height: 8
+    fig_caption: true
+    df_print: paged
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+This script aim to integrate mouse RNAseq and affymetrix samples.
+
+```{r library_file_import, echo=FALSE}
+
+# Paths
+pathToHome                   <- "/bioinfo/users/mandrian/"
+pathToRhabdoid_U830_projects <- paste0(pathToHome,"rhabdoid_U830_projects/")
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+#pathToRpackages              <- paste0(pathToProgrammes,"Rpackages/")
+pathToRpackages              <- paste0(pathToProgrammes,"Rpackages_R.3.6/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToMurine_RT              <- paste0(pathToANALYSIS_PROJECTS,"murine_RT/")
+pathToMurine_RT_info         <- paste0(pathToMurine_RT,"svn/analyse/info/") 
+pathToData                   <- paste0(pathToMurine_RT,"data/") 
+pathToFigures                <- paste0(pathToMurine_RT,"svn/analyse/script/figures/") 
+
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r load_library}
+
+#.libPaths(pathToRpackages)
+
+source("load_integration_library.R")
+
+source("plot_R_util.R")
+
+```
+
+```{r load_saved_RData, eval=TRUE}
+
+#load(".RData_affy")
+
+load("murine_RT_integration_affy_RNAseq.RData")
+
+#save.image(file = "murine_RT_integration_affy_RNAseq.RData")
+
+```
+
+# Load external files
+
+```{r load_library}
+
+source("/bioinfo/users/mandrian/rhabdoid_U830_projects/programmes/plot_functions.R")
+source("plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+
+paperFig_fontsize <- 6
+
+```
+
+# Mouse affymetrix and RNAseq data integration
+
+## R26 affy and RNAseq data integration
+
+### Data import
+
+#### Affy samples
+
+```{r murine_affy_sample}
+
+# Load murine RNAseq R26 data
+murine_RT_R26_affy_list <- readRDS("murine_RT_R26_affy_list.RDS")
+
+# R26 affy sample plan
+samples_Curie_R26_affy <- murine_RT_R26_affy_list$sampleTable
+nrow(samples_Curie_R26_affy)
+samples_Curie_R26_affy$group_name
+samples_Curie_R26_affy$sub_localization_of_primary_tumor
+
+# R26 affy matrix
+head(my_matrix_R_annotated)
+matrix_Curie_R26_affy <- murine_RT_R26_affy_list$matrix
+head(matrix_Curie_R26_affy)
+dim(matrix_Curie_R26_affy)
+
+# Use symbol column as row names
+matrix_Curie_R26_affy <- matrix_Curie_R26_affy[!duplicated(matrix_Curie_R26_affy$symbol),]
+matrix_Curie_R26_affy <- matrix_Curie_R26_affy[!is.na(matrix_Curie_R26_affy$symbol),]
+rownames(matrix_Curie_R26_affy) <- matrix_Curie_R26_affy$symbol
+matrix_Curie_R26_affy$Row.names <- NULL
+matrix_Curie_R26_affy$symbol <- NULL
+head(matrix_Curie_R26_affy)
+
+
+# Density distribution
+#pdf(paste0(pathToFigures,"density_murine_affy_R26_primTum.pdf"), width=16, height=12)
+melt(matrix_Curie_R26_affy) %>%
+    ggplot() +
+    geom_density(mapping = aes(x = value)
+                 ) +
+    theme_bw()
+#dev.off()
+
+# Most variable genes
+mvGenes_Curie_R26_affy <- genes.selection(data       = matrix_Curie_R26_affy,
+                                          thres.num  = 2000
+                                          )
+
+# Subset matrix
+matrix_Curie_R26_affy_mvGenes <- matrix_Curie_R26_affy[mvGenes_Curie_R26_affy,]
+
+# Top annotation
+top_annot_R26_affy_fig <- HeatmapAnnotation(df                      = transmute(data.frame(samples_Curie_R26_affy[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date","Data_type")]),
+                                                                                location = Localization_of_primary_tumor,
+                                                                                sub_location = case_when(sub_localization_of_primary_tumor == "intra_CNS" ~ "intra-CNS",
+                                                                                                         TRUE ~ "extra-CNS"
+                                                                                                         ),
+                                                                                tamoxifen = Tamoxifen_date
+                                                                                ),
+                                            col                     = list(location = localization_of_primary_tumor_col,
+                                                                           sub_location = sub_localization_of_primary_tumor_col,
+                                                                           tamoxifen = tamoxifen_date_col
+                                                                           ),
+                                            gap                     = unit(1,"mm"),
+                                            show_annotation_name    = TRUE,
+                                            annotation_name_gp      = gpar(fontsize    = 7.5),
+                                            annotation_name_side    = "left",
+                                            height                  = unit(c(1,0.5),"cm"),
+                                            na_col                  = "grey",
+                                            show_legend             = FALSE
+                                            )
+
+
+# Plot hierarchical clustering for paper
+m_affy_R26 <- Heatmap(matrix                       = matrix_Curie_R26_affy_mvGenes,
+                      top_annot                    = top_annot_R26_affy_fig,
+                      show_row_names               = FALSE,
+                      clustering_distance_columns  = "pearson",
+                      clustering_method_columns    = "ward",
+                      show_heatmap_legend          = FALSE,
+                      column_dend_height           = unit(15, "mm"),
+                      #height                       = unit(0,'npc'),
+                      show_row_dend                = FALSE
+                      )
+
+# Grab plot
+m_affy_R26_grab <- grid.grabExpr(draw(m_affy_R26))
+
+# Export data for source data
+write.csv(x = matrix_Curie_R26_affy_mvGenes,
+          file = "LobonIglesias_sourceData/SuppFig3_A.csv",
+          row.names = TRUE
+          )
+
+```
+
+#### RNAseq samples
+
+```{r murine_RNAseq_sample}
+
+# Load murine RNAseq R26 data
+load("mouse_Curie_R26_primTum_RNAseq_list.RData")
+
+str(mouse_Curie_R26_primTum_RNAseq_list, max.level=2)
+
+# R26 in situ sample
+sample_Curie_RNAseq_R26 <- mouse_Curie_R26_primTum_RNAseq_list$sampleTable
+
+# R26 in situ matrix
+matrix_rld_Curie_RNAseq_R26 <- mouse_Curie_R26_primTum_RNAseq_list$matrixRld
+head(matrix_rld_Curie_RNAseq_R26[,1:4])
+
+# Density distribution
+#pdf(paste0(pathToFigures,"density_murine_RNAseq_R26_primTum.pdf"), width=16, height=12)
+melt(matrix_rld_Curie_RNAseq_R26) %>%
+    ggplot() +
+    geom_density(mapping = aes(x = value)
+                 ) +
+    theme_bw()
+#dev.off()
+
+# Data filtering
+matrix_rld_Curie_RNAseq_R26_filt <- expFilter(data       = matrix_rld_Curie_RNAseq_R26,
+                                              threshold  = 5,
+                                              graph      = TRUE
+                                              )
+
+# Density distribution
+#pdf(paste0(pathToFigures,"density_murine_RNAseq_R26_primTum_filt.pdf"), width=16, height=12)
+melt(matrix_rld_Curie_RNAseq_R26_filt) %>%
+    ggplot() +
+    geom_density(mapping = aes(x = value)
+                 ) +
+    theme_bw()
+#dev.off()
+
+# Most variable genes
+mvGenes_Curie_R26_RNAseq <- genes.selection(data       = matrix_rld_Curie_RNAseq_R26_filt,
+                                          thres.num  = 2000
+                                          )
+
+# Subset matrix
+matrix_rld_Curie_RNAseq_R26_filt_mvGenes <- matrix_rld_Curie_RNAseq_R26_filt[mvGenes_Curie_R26_RNAseq,]
+
+# Top annotation
+top_annot_R26_RNAseq_fig <- HeatmapAnnotation(df                      = transmute(data.frame(sample_Curie_RNAseq_R26[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date","Data_type")]),
+                                                                                location = Localization_of_primary_tumor,
+                                                                                sub_location = case_when(sub_localization_of_primary_tumor == "intra_CNS" ~ "intra-CNS",
+                                                                                                         TRUE ~ "extra-CNS"
+                                                                                                         ),
+                                                                                tamoxifen = Tamoxifen_date
+                                                                                ),
+                                            col                     = list(location = localization_of_primary_tumor_col,
+                                                                           sub_location = sub_localization_of_primary_tumor_col,
+                                                                           tamoxifen = tamoxifen_date_col
+                                                                           ),
+                                            gap                     = unit(1,"mm"),
+                                            show_annotation_name    = TRUE,
+                                            annotation_name_gp      = gpar(fontsize    = 7.5),
+                                            annotation_name_side    = "left",
+                                            height                  = unit(c(1,0.5),"cm"),
+                                            na_col                  = "grey",
+                                            show_legend             = FALSE
+                                            )
+
+
+# Plot hierarchical clustering for paper
+m_RNAseq_R26 <- Heatmap(matrix                       = matrix_rld_Curie_RNAseq_R26_filt_mvGenes,
+                        top_annot                    = top_annot_R26_RNAseq_fig,
+                        show_row_names               = FALSE,
+                        clustering_distance_columns  = "pearson",
+                        clustering_method_columns    = "ward",
+                        show_heatmap_legend          = FALSE,
+                        column_dend_height           = unit(15, "mm"),
+                                        #height                       = unit(0,'npc'),
+                        show_row_dend                = FALSE
+                        )
+
+# Grab plot
+m_RNAseq_R26_grab <- grid.grabExpr(draw(m_RNAseq_R26))
+
+# Export data for source data
+write.csv(x = matrix_rld_Curie_RNAseq_R26_filt_mvGenes,
+          file = "LobonIglesias_sourceData/SuppFig3_B.csv",
+          row.names = TRUE
+          )
+
+```
+
+### Data scaling
+
+```{r data_scaling}
+
+# Scale R26 affy matrix
+matrix_Curie_R26_affy_scaled <- scale(x       = matrix_Curie_R26_affy,
+                                      center  = TRUE,
+                                      scale   = TRUE
+                                      )
+
+# Density distribution
+#pdf(paste0(pathToFigures,"density_murine_affy_R26_primTum_scaled.pdf"), width=16, height=12)
+melt(matrix_Curie_R26_affy_scaled) %>%
+    ggplot() +
+    geom_density(mapping = aes(x = value)
+                 ) +
+    theme_bw()
+#dev.off()
+
+# Scale R26 RNAseq matrix
+matrix_rld_Curie_RNAseq_R26_filt_scaled <- scale(x       = matrix_rld_Curie_RNAseq_R26_filt,
+                                                 center  = TRUE,
+                                                 scale   = TRUE
+                                                 )
+
+# Density distribution
+#pdf(paste0(pathToFigures,"density_murine_RNAseq_R26_primTum_filt_scaled.pdf"), width=16, height=12)
+melt(matrix_rld_Curie_RNAseq_R26_filt_scaled) %>%
+    ggplot() +
+    geom_density(mapping = aes(x = value)
+                 ) +
+    theme_bw()
+#dev.off()
+
+```
+
+### Data merging
+
+```{r data_scaling}
+
+# Bind sample plans
+sample_Curie_R26_affy_RNAseq <- rbind(samples_Curie_R26_affy,
+                                      sample_Curie_RNAseq_R26
+                                      )
+nrow(sample_Curie_R26_affy_RNAseq)
+
+
+# Merge matrix
+matrix_Curie_R26_affy_RNAseq <- merge(x = matrix_Curie_R26_affy_scaled,
+                                      y = matrix_rld_Curie_RNAseq_R26_filt_scaled,
+                                      by = 0
+                                      )
+
+rownames(matrix_Curie_R26_affy_RNAseq) <- matrix_Curie_R26_affy_RNAseq$Row.names
+matrix_Curie_R26_affy_RNAseq$Row.names <- NULL
+
+head(matrix_Curie_R26_affy_RNAseq)
+dim(matrix_Curie_R26_affy_RNAseq)
+
+# Check order
+colnames(matrix_Curie_R26_affy_RNAseq) == sample_Curie_R26_affy_RNAseq$Sample_name
+
+```
+
+### Assessing batch effect
+
+```{r assessing_batch}
+
+# PCA
+#pdf(paste0(pathToFigures,"pca_murine_affy_RNAseq_R26_primTum.pdf"), width=16, height=12)
+pca_func(matrix                      = matrix_Curie_R26_affy_RNAseq,
+         sampleTable                 = sample_Curie_R26_affy_RNAseq,
+         highlightedVar              = "Data_type",
+         highlightedVarName          = 'Data type',#highlightedVar,
+         colors                      = NULL,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointSize                   = 10
+         )
+#dev.off()
+
+```
+
+### Removing data type batch effect
+
+```{r remove_batch}
+
+# Correct batch
+matrix_Curie_R26_affy_RNAseq_batchCorr <- ComBat(dat = matrix_Curie_R26_affy_RNAseq,
+                                                 batch = sample_Curie_R26_affy_RNAseq$Data_type
+                                                 )
+
+# PCA
+#pdf(paste0(pathToFigures,"pca_murine_affy_RNAseq_R26_primTum_batchCorr.pdf"), width=16, height=12)
+pca_func(matrix                      = matrix_Curie_R26_affy_RNAseq_batchCorr,
+         sampleTable                 = sample_Curie_R26_affy_RNAseq,
+         highlightedVar              = "Data_type",
+         highlightedVarName          = 'Data type',#highlightedVar,
+         colors                      = NULL,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointSize                   = 10
+         )
+#dev.off()
+
+```
+
+### Hierarchical clustering
+
+```{r hierarchical_clustering}
+
+# Most variable genes
+mvGenes_R26_affy_RNAseq <- genes.selection(data = matrix_Curie_R26_affy_RNAseq_batchCorr,
+                                           thres.num = 5000
+                                           )
+
+# Subset matrix
+matrix_Curie_R26_affy_RNAseq_batchCorr_mvGenes <- matrix_Curie_R26_affy_RNAseq_batchCorr[mvGenes_R26_affy_RNAseq,]
+
+# Check order
+colnames(matrix_Curie_R26_affy_RNAseq_batchCorr_mvGenes) == sample_Curie_R26_affy_RNAseq$Sample_name
+
+
+# Top annotation
+top_annot_R26_affy_RNAseq <- createTopAnnot_func(sampleTable = transmute(data.frame(sample_Curie_R26_affy_RNAseq[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date","Data_type")]),
+                                                                         location = Localization_of_primary_tumor,
+                                                                         sub_location = sub_localization_of_primary_tumor,
+                                                                         tamoxifen = Tamoxifen_date,
+                                                                         Data_type = Data_type
+                                                                         ),
+                                                 columns               = c("location","sub_location","tamoxifen","Data_type"),
+                                                 colorsList = list(localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col,tamoxifen_date_col,data_type_col),
+                                                 show_legend           = TRUE,
+                                                 legend_ncol           = 1,
+                                                 fontsize              = 20,
+                                                 show_annotation_name  = TRUE
+                                                 )
+
+# Plot hierarchical clustering and heatmap
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_affy_RNAseq_R26_primTum_batchCorr.pdf"), width=16, height=12)
+drawHeatmap_func(matrix               = matrix_Curie_R26_affy_RNAseq_batchCorr_mvGenes,
+                 column_title         = "R26 (in situ and allograft) samples",
+                 row_title            = "1000 most variable genes (IQR)",
+                 top_annot            = top_annot_R26_affy_RNAseq,
+                 row_annot            = NULL,
+                 bottom_annot         = NULL,
+                 legend_title         = "rlog",
+                 show_column_names    = TRUE,
+                 show_row_names       = FALSE,
+                 add_column_dend_axis = FALSE,
+                 columns_dist         = "euclidean",
+                 columns_meth         = "ward",
+                 cluster_columns      = TRUE,
+                 cluster_rows         = TRUE,
+                 rows_dist            = "euclidean",
+                 rows_meth            = "ward",
+                 fontsize             = 20,
+                 split                = NULL,
+                 annotation_legend_side = "bottom"
+                 )
+#dev.off()
+
+```
+
+### Hierarchical clustering for paper figure
+
+```{r hierarchical_clustering}
+
+# Top annotation
+top_annot_R26_affy_RNAseq_fig <- createTopAnnot_func(sampleTable = transmute(data.frame(sample_Curie_R26_affy_RNAseq[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date","Data_type")]),
+                                                                         location = Localization_of_primary_tumor,
+                                                                         sub_location = case_when(sub_localization_of_primary_tumor == "intra_CNS" ~ "intra-CNS",
+                                                                                                  TRUE ~ "extra-CNS"
+                                                                                                 ),
+                                                                         tamoxifen = Tamoxifen_date
+                                                                         ),
+                                                 columns               = c("location","sub_location","tamoxifen"),
+                                                 colorsList = list(localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col,tamoxifen_date_col),
+                                                 show_legend           = TRUE,
+                                                 legend_ncol           = 1,
+                                                 fontsize              = 20,
+                                                 show_annotation_name  = TRUE,
+                                                 simple_anno_size = unit(2,"cm")
+                                                 )
+
+# Plot hierarchical clustering and heatmap (no heatmap)
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_affy_RNAseq_R26_primTum_batchCorr_dendOnly.pdf"), width=16, height=12)
+drawHeatmap_func(matrix                  = matrix_Curie_R26_affy_RNAseq_batchCorr_mvGenes,
+                 column_title            = "R26 (in situ and allograft) samples",
+                 row_title               = NULL,
+                 row_subtitle            = NULL,
+                 top_annot               = top_annot_R26_affy_RNAseq_fig,
+                 row_annot               = NULL,
+                 bottom_annot            = NULL,
+                 legend_title            = "rlog",
+                 show_column_names       = TRUE,
+                 show_row_names          = FALSE,
+                 add_column_dend_axis    = FALSE,
+                 columns_dist            = "euclidean",
+                 columns_meth            = "ward",
+                 cluster_columns         = TRUE,
+                 cluster_rows            = TRUE,
+                 rows_dist               = "euclidean",
+                 rows_meth               = "ward",
+                 fontsize                = 20,
+                 split                   = NULL,
+                 annotation_legend_side  = "bottom",
+                 height                  = unit(0,'npc'),
+                 rect_gp                 = gpar(type = 'none'),
+                 show_heatmap_legend     = FALSE,
+                 column_dend_gp          = gpar(lwd = 1.5),
+                 column_dend_height      = unit(10, "cm"),
+                 column_names_gp = gpar(fontsize = 25,
+                                        col = case_when(sample_Curie_R26_affy_RNAseq$Data_type == "RNA_microarray" ~ 'blue',
+                                                        TRUE ~ 'brown'
+                                                        ),
+                                        fontface = case_when(sample_Curie_R26_affy_RNAseq$Patient_ID %in% c("29050","29225","29941") ~ 4,
+                                                         TRUE ~ 1
+                                                         )
+                                        )
+                 )
+#dev.off()
+
+fontsize <- 10
+
+# Top annotation (for figure)
+top_annot_R26_affy_RNAseq_fig <- createTopAnnot_func(sampleTable = transmute(data.frame(sample_Curie_R26_affy_RNAseq[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date","Data_type")]),
+                                                                         location = Localization_of_primary_tumor,
+                                                                         sub_location = case_when(sub_localization_of_primary_tumor == "intra_CNS" ~ "intra-CNS",
+                                                                                                  TRUE ~ "extra-CNS"
+                                                                                                 ),
+                                                                         tamoxifen = Tamoxifen_date
+                                                                         ),
+                                                 columns               = c("location","sub_location","tamoxifen"),
+                                                 colorsList = list(localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col,tamoxifen_date_col),
+                                                 show_legend           = FALSE,
+                                                 fontsize              = fontsize,
+                                                 show_annotation_name  = TRUE,
+                                                 gap = unit(1,"mm"),
+                                                 simple_anno_size = unit(2,"mm")
+                                                 )
+
+
+top_annot_R26_affy_RNAseq_fig <- HeatmapAnnotation(df                      = transmute(data.frame(sample_Curie_R26_affy_RNAseq[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date","Data_type")]),
+                                                                                       location = Localization_of_primary_tumor,
+                                                                                       sub_location = case_when(sub_localization_of_primary_tumor == "intra_CNS" ~ "intra-CNS",
+                                                                                                                TRUE ~ "extra-CNS"
+                                                                                                                ),
+                                                                                       tamoxifen = Tamoxifen_date
+                                                                                       ),
+                                                   col                     = list(location = localization_of_primary_tumor_col,
+                                                                                  sub_location = sub_localization_of_primary_tumor_col,
+                                                                                  tamoxifen = tamoxifen_date_col
+                                                                                  ),
+                                                   gap                     = unit(1,"mm"),
+                                                   show_annotation_name    = TRUE,
+                                                   annotation_name_gp      = gpar(fontsize    = 7.5),
+                                                   annotation_name_side    = "left",
+                                                   height                  = unit(c(1,0.5),"cm"),
+                                                   na_col                  = "grey",
+                                                   show_legend             = FALSE
+                                                   )
+
+
+# Plot hierarchical clustering for paper
+m_integrated_R26 <- Heatmap(matrix                       = matrix_Curie_R26_affy_RNAseq_batchCorr_mvGenes,
+                            top_annot                    = top_annot_R26_affy_RNAseq_fig,
+                            show_row_names               = FALSE,
+                            clustering_distance_columns  = "euclidean",
+                            clustering_method_columns    = "ward",
+                            show_heatmap_legend          = FALSE,
+                            column_dend_height           = unit(15, "mm"),
+                            height                       = unit(0,'npc'),
+                            show_row_dend                = FALSE,
+                            column_names_gp = gpar(fontsize = fontsize,
+                                                   col = case_when(sample_Curie_R26_affy_RNAseq$Data_type == "RNA_microarray" ~ 'green',
+                                                                   TRUE ~ 'black'
+                                                                   ),
+                                                   fontface = case_when(sample_Curie_R26_affy_RNAseq$Patient_ID %in% c("29050","29225","29941") ~ 4,
+                                                                        TRUE ~ 1
+                                                                        )
+                                                   )
+                            )
+
+# Grab plot
+m_integrated_R26_grab <- grid.grabExpr(draw(m_integrated_R26,
+                                            annotation_legend_side = "bottom"
+                                            )
+                                       )
+
+# Export data for source data
+write.csv(x = matrix_Curie_R26_affy_RNAseq_batchCorr_mvGenes,
+          file = "LobonIglesias_sourceData/Figure3_A.csv",
+          row.names = TRUE
+          )
+
+```
+
+### Create legend for paper figure
+
+```{r createLegend}
+
+# Create location legend
+location <- levels(factor(sample_Curie_R26_affy_RNAseq$Localization_of_primary_tumor)
+                     )
+
+lgd_location <- Legend(labels                    = location,
+                         title                     = "location\n",
+                         legend_gp                 = gpar(fill = localization_of_primary_tumor_col[location]
+                                                          ),
+                         title_gp                  = gpar(fontsize = fontsize,
+                                                          fontface  = "bold"
+                                                          ),
+                         labels_gp                 = gpar(fontsize = fontsize
+                                                          ),
+                         grid_height               = unit(0.5,"cm"),
+                         grid_width                = unit(0.5,"cm"),
+                         nrow                      = 2,
+                         gap                       = unit(0.5,"cm")
+                       )
+lgd_location_grab <- grid.grabExpr(draw(lgd_location))
+
+# Create sub-location legend
+sublocation <- levels(factor(case_when(sample_Curie_R26_affy_RNAseq$sub_localization_of_primary_tumor == "intra_CNS" ~ "intra-CNS",
+                                       TRUE ~ "extra-CNS"
+                                       ))
+                     )
+
+lgd_sublocation <- Legend(labels                    = sublocation,
+                         title                     = "sub_location\n",
+                         legend_gp                 = gpar(fill = sub_localization_of_primary_tumor_col[sublocation]
+                                                          ),
+                         title_gp                  = gpar(fontsize = fontsize,
+                                                          fontface  = "bold"
+                                                          ),
+                         labels_gp                 = gpar(fontsize = fontsize
+                                                          ),
+                         grid_height               = unit(0.5,"cm"),
+                         grid_width                = unit(0.5,"cm"),
+                         nrow                      = 2,
+                         gap                       = unit(0.5,"cm")
+                         )
+lgd_location_grab <- grid.grabExpr(draw(lgd_sublocation))
+
+# Create tamoxifen date legend
+tamoxifen <- levels(factor(sample_Curie_R26_affy_RNAseq$Tamoxifen_date)
+                     )
+
+lgd_tamoxifen <- Legend(labels                    = tamoxifen,
+                         title                     = "tamoxifen\n",
+                         legend_gp                 = gpar(fill = tamoxifen_date_col[tamoxifen]
+                                                          ),
+                         title_gp                  = gpar(fontsize = fontsize,
+                                                          fontface  = "bold"
+                                                          ),
+                         labels_gp                 = gpar(fontsize = fontsize
+                                                          ),
+                         grid_height               = unit(0.5,"cm"),
+                         grid_width                = unit(0.5,"cm"),
+                         nrow                      = 2,
+                         gap                       = unit(0.5,"cm")
+                        )
+lgd_location_grab <- grid.grabExpr(draw(lgd_tamoxifen))
+
+# Group legends
+legends_location_sublocation_tamoxifen <- packLegend(list = list(lgd_location,
+                                                               lgd_sublocation,
+                                                               lgd_tamoxifen
+                                                               ),
+                                                   direction = "horizontal",
+                                                   column_gap = unit(1,"cm")
+                                                   )
+legends_location_sublocation_tamoxifen_grab <- grid.grabExpr(draw(legends_location_sublocation_tamoxifen))
+
+```
+
+### Remove duplicated mouse samples
+
+```{r remove_duplicated_sample}
+
+# Duplicated samples
+sample_Curie_R26_affy_RNAseq[duplicated(sample_Curie_R26_affy_RNAseq$Patient_ID),c('Sample_name','Patient_ID','Data_type')]
+
+duplicated_mouse <- sample_Curie_R26_affy_RNAseq[duplicated(sample_Curie_R26_affy_RNAseq$Patient_ID),"Patient_ID"]
+
+# Remove affy data corresponding to duplicated samples
+sample_Curie_R26_affy_RNAseq_noDup <- filter(sample_Curie_R26_affy_RNAseq,
+                                             !(Patient_ID %in% duplicated_mouse & Data_type == 'RNA_microarray')
+                                             )
+
+nrow(sample_Curie_R26_affy_RNAseq)
+nrow(sample_Curie_R26_affy_RNAseq_noDup)
+
+# subset matrix
+matrix_Curie_R26_affy_RNAseq_noDup <- matrix_Curie_R26_affy_RNAseq[,sample_Curie_R26_affy_RNAseq_noDup$Sample_name]
+
+# Correct batch
+matrix_Curie_R26_affy_RNAseq_noDup_batchCorr <- ComBat(dat = matrix_Curie_R26_affy_RNAseq_noDup,
+                                                       batch = sample_Curie_R26_affy_RNAseq_noDup$Data_type
+                                                       )
+
+
+# Most variable genes
+mvGenes_R26_affy_RNAseq_noDup <- genes.selection(data = matrix_Curie_R26_affy_RNAseq_noDup_batchCorr,
+                                                 thres.num = 5000
+                                                 )
+
+# Subset matrix
+matrix_Curie_R26_affy_RNAseq_noDup_batchCorr_mvGenes <- matrix_Curie_R26_affy_RNAseq_noDup_batchCorr[mvGenes_R26_affy_RNAseq_noDup,]
+
+# Check order
+colnames(matrix_Curie_R26_affy_RNAseq_noDup_batchCorr_mvGenes) == sample_Curie_R26_affy_RNAseq_noDup$Sample_name
+
+
+# Top annotation
+top_annot_R26_affy_RNAseq_noDup <- createTopAnnot_func(sampleTable = transmute(data.frame(sample_Curie_R26_affy_RNAseq_noDup[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date","Data_type")]),
+                                                                         location = Localization_of_primary_tumor,
+                                                                         sub_location = sub_localization_of_primary_tumor,
+                                                                         tamoxifen = Tamoxifen_date,
+                                                                         Data_type = Data_type
+                                                                         ),
+                                                 columns               = c("location","sub_location","tamoxifen","Data_type"),
+                                                 colorsList = list(localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col,tamoxifen_date_col,data_type_col),
+                                                 show_legend           = TRUE,
+                                                 legend_ncol           = 1,
+                                                 fontsize              = 20,
+                                                 show_annotation_name  = TRUE
+                                                 )
+
+# Plot hierarchical clustering and heatmap
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_affy_RNAseq_R26_primTum_batchCorr_noDup.pdf"), width=16, height=12)
+drawHeatmap_func(matrix               = matrix_Curie_R26_affy_RNAseq_noDup_batchCorr_mvGenes,
+                 column_title         = "R26 in situ (RNA-seq and affy) samples",
+                 row_title            = "1000 most variable genes (IQR)",
+                 top_annot            = top_annot_R26_affy_RNAseq_noDup,
+                 row_annot            = NULL,
+                 bottom_annot         = NULL,
+                 legend_title         = "rlog",
+                 show_column_names    = TRUE,
+                 show_row_names       = FALSE,
+                 add_column_dend_axis = FALSE,
+                 columns_dist         = "euclidean",
+                 columns_meth         = "ward",
+                 cluster_columns      = TRUE,
+                 cluster_rows         = TRUE,
+                 rows_dist            = "euclidean",
+                 rows_meth            = "ward",
+                 fontsize             = 20,
+                 split                = NULL,
+                 annotation_legend_side = "bottom"
+                 )
+#dev.off()
+
+
+# Top annotation
+top_annot_R26_affy_RNAseq_noDup2 <- createTopAnnot_func(sampleTable = transmute(data.frame(sample_Curie_R26_affy_RNAseq_noDup[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date")]),
+                                                                         location = Localization_of_primary_tumor,
+                                                                         sub_location = sub_localization_of_primary_tumor,
+                                                                         tamoxifen = Tamoxifen_date
+                                                                         ),
+                                                 columns               = c("location","sub_location","tamoxifen"),
+                                                 colorsList = list(localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col,tamoxifen_date_col),
+                                                 show_legend           = TRUE,
+                                                 legend_ncol           = 1,
+                                                 fontsize              = 20,
+                                                 show_annotation_name  = TRUE
+                                                 )
+
+# Plot hierarchical clustering and heatmap
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_affy_RNAseq_R26_primTum_batchCorr_noDup_dendOnly.pdf"), width=18, height=10)
+drawHeatmap_func(matrix               = matrix_Curie_R26_affy_RNAseq_noDup_batchCorr_mvGenes,
+                 column_title         = "R26 in situ (RNA-seq and affy) samples",
+                 row_title            = NULL,
+                 row_subtitle         = NULL,
+                 top_annot            = top_annot_R26_affy_RNAseq_noDup2,
+                 row_annot            = NULL,
+                 bottom_annot         = NULL,
+                 legend_title         = "rlog",
+                 show_column_names    = TRUE,
+                 show_row_names       = FALSE,
+                 add_column_dend_axis = FALSE,
+                 columns_dist         = "euclidean",
+                 columns_meth         = "ward",
+                 cluster_columns      = TRUE,
+                 cluster_rows         = TRUE,
+                 rows_dist            = "euclidean",
+                 rows_meth            = "ward",
+                 fontsize             = 20,
+                 split                = NULL,
+                 rect_gp = gpar(type = 'none'),
+                 show_heatmap_legend = FALSE,
+                 annotation_legend_side = "bottom",
+                 #heatmap_height = unit(0,'npc'),
+                 height = unit(0,'npc')
+                 )
+#dev.off()
+
+```
+
+
+# Figure 1bis (figure3 LobonIglesias2022)
+
+```{r figure1bis}
+
+library(patchwork)
+
+# Hierarchical clustering of combined murine affy and RNA-seq data
+figure1bis_a <- wrap_plots(m_integrated_R26_grab) +
+    labs(tag = 'A')
+figure1bis_a <- wrap_plots(figure1bis_a,
+                           legends_location_sublocation_tamoxifen_grab,
+                           heights = c(0.775,0.225)
+                           )
+
+# Brain schema
+library(figpatch)
+
+murine_brain_tumors <- fig(path = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/svn/analyse/info/Figure3_B.pdf"
+                           )
+
+figure1bis_b <- wrap_plots(murine_brain_tumors) +
+    labs(tag = "B") &
+    theme(plot.tag = element_text(vjust = 4))
+figure1bis_b <- wrap_plots(figure1bis_b,
+                           plot_spacer(),
+                           heights = c(0.8,0.2)
+                           )
+
+# HC and brain image
+figure1bis_ab <- wrap_plots(figure1bis_a,
+                            figure1bis_b,
+                            widths = c(0.65,0.35)
+                            )
+
+# IHC images
+murine_IHC <- fig(path = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/svn/analyse/info/Figure3C.pdf"
+                  )
+
+figure1bis_c <- wrap_plots(murine_IHC) +
+    labs(tag = "C")
+figure1bis_c <- wrap_plots(figure1bis_c,
+                           plot_spacer(),
+                           heights = c(0.8,0.2)
+                           )
+
+#murine_IHC_a <- fig(path = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/svn/analyse/info/Figure3Ca.pdf"
+#                           )
+#murine_IHC_b <- fig(path = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/svn/analyse/info/Figure3Cb.pdf"
+#                           )
+#murine_IHC_c <- fig(path = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/svn/analyse/info/Figure3Cc.pdf"
+#                           )
+#murine_IHC_d <- fig(path = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/svn/analyse/info/Figure3Cd.pdf"
+#                           )
+
+#figure1bis_c <- wrap_plots(murine_IHC_a,
+ #                          murine_IHC_b,
+  #                         murine_IHC_c,
+   #                        murine_IHC_d,
+    #                       nrow = 2
+     #                      )
+
+
+# Radar plot of neuron and immune related DE gene sets
+gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered <- readRDS(file = "gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered.RDS")
+sample_Curie_R26_primTum_plus_ordered <- readRDS(file = "sample_Curie_R26_primTum_plus_ordered.RDS")
+sampleName_vectoColors <- readRDS(file = "sampleName_vectoColors.RDS")
+
+library(ggradar)
+
+radarPlot_gsva_murine <- ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered,
+                                     grid.min           = min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered[,-1], .funs = min)),
+                                     grid.max           = max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered[,-1], .funs = max)),
+                                     grid.mid           = mean(max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered[,-1], .funs = max)) + min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered[,-1], .funs = min))),
+                                     axis.label.colour         = sampleName_vectoColors,
+                                     axis.label.size         = fontsize/3,
+                                     legend.text.size                = fontsize,
+                                     grid.label.size                = fontsize/3,
+                                     group.line.width                = 0.25,
+                                     group.point.size                = 1, 
+                                     fill                      = TRUE,
+                                     fill.alpha                = 0.1,
+                                     group.colours             = c('blue','brown'),
+                                     background.circle.colour  = 'white',
+                                     legend.key.height               = 1
+                                     ) +
+    theme(legend.position = "bottom",
+          legend.direction = "vertical"
+          )
+
+# Export data for source data
+write.csv(x = gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered,
+          file = "LobonIglesias_sourceData/Figure3_D.csv",
+          row.names = FALSE
+          )
+
+
+figure1bis_d <- wrap_plots(radarPlot_gsva_murine)  +
+    labs(tag = 'D')
+figure1bis_d <- wrap_plots(figure1bis_d,
+                           plot_spacer(),
+                           heights = c(0.9,0.1)
+                           )
+
+# IHC and radar plot
+figure1bis_cd <- wrap_plots(figure1bis_c,
+                            figure1bis_d,
+                            widths = c(0.6,0.4)
+                            )
+
+# Patchwork
+figure1bis <- wrap_plots(figure1bis_ab,
+                         plot_spacer(),
+                         figure1bis_cd,
+                         heights = c(0.425,0.025,0.55)
+                         ) &
+    theme(text = element_text(face = 'bold',size = 9),
+          plot.tag = element_text(size = 20, face = 'bold')
+          ) &
+    plot_annotation(title = "Figure 3\n",
+                    theme = theme(plot.margin = unit(c(1,2,2,2),'cm'),
+                                  text = element_text(size = 20)
+                                  )
+                    )
+
+# Rename figure
+figure3_LobonIglesias2022 <- figure1bis
+
+# Save figure into pdf file
+ggsave(plot   = figure3_LobonIglesias2022,
+       file   = paste0(pathToFigures,"figure3_LobonIglesias2022.pdf"),
+       width  = 210, #full a4 210
+       height = 220, # full a4 297
+       units  = "mm"
+       )
+
+# Copy to Zerkalo
+copyToZerkalo(file        = paste0(pathToFigures,"figure3_LobonIglesias2022.pdf"),
+              zerkaloDir  = "mandrian_murine_RT"
+              )
+
+```
+
+
+# Supplementary Fig. 3 (LobonIglesias2022)
+
+```{r figure1bis}
+
+library(patchwork)
+
+# HC affy
+SuppFig3_A <- wrap_plots(m_affy_R26_grab) + labs(tag = 'A')
+
+# HC RNAseq
+SuppFig3_B <- wrap_plots(m_RNAseq_R26_grab) + labs(tag = 'B')
+
+# HC affy and RNAseq
+SuppFig3_AB <- wrap_plots(SuppFig3_A,
+                          SuppFig3_B,
+                          widths = c(0.4,0.6)
+                          )
+
+# Legend
+SuppFig3_AB_lgd <- wrap_plots(legends_location_sublocation_tamoxifen_grab)
+
+
+# IHC images
+#suppFig3C <- fig(path = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/svn/analyse/info/SuppFig3_C.pdf"
+                  )
+#suppFig3C <- wrap_plots(suppFig3C) + labs(tag = 'C')
+
+# Import Smarcb1 and Ki67 IHC
+
+library(png)
+
+suppFig3C <- readPNG(source = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/svn/analyse/info/SuppFig3_C.png",
+                    native = TRUE
+                    )
+suppFig3C <- rasterGrob(image        = suppFig3C,
+                        interpolate  = TRUE
+                        )
+suppFig3C <- wrap_plots(suppFig3C) + labs(tag = 'C')
+
+# Patchwork
+SuppFig3 <- wrap_plots(SuppFig3_AB,
+                       SuppFig3_AB_lgd,
+                       plot_spacer(),
+                       suppFig3C,
+                       heights = c(0.5,0.1,0.05,0.35)
+                       ) &
+    theme(text = element_text(face = 'bold',size = 9),
+          plot.tag = element_text(size = 20, face = 'bold')
+          ) &
+    plot_annotation(title = "Supplementary Fig. 3\n",
+                    theme = theme(plot.margin = unit(c(1,2,2,2),'cm'),
+                                  text = element_text(size = 20)
+                                  )
+                    )
+
+# Save figure into pdf file
+ggsave(plot   = SuppFig3,
+       file   = paste0(pathToFigures,"SuppFig3_LobonIglesias2022.pdf"),
+       width  = 210, #full a4 210
+       height = 297, # full a4 297
+       units  = "mm"
+       )
+
+# Copy to Zerkalo
+copyToZerkalo(file        = paste0(pathToFigures,"SuppFig3_LobonIglesias2022.pdf"),
+              zerkaloDir  = "mandrian_murine_RT"
+              )
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r murine_N_RNAseq_filtering}
+
+# Filter log2p1 RNAseq TPM data based on value of sum of log2p1 in all samples 
+my_matrix_N_RNAseq_log2p1_sum <- data.frame(my_matrix_N_RNAseq_log2p1)
+my_matrix_N_RNAseq_log2p1_sum$sum <- rowSums(my_matrix_N_RNAseq_log2p1_sum, na.rm=FALSE)
+
+# Plot sum density
+#pdf(paste0(pathToFigures,"density_murine_RNAseq_sumTPM.pdf"), width=12, height=12)
+plot(density(my_matrix_N_RNAseq_log2p1_sum$sum))
+abline(v=30, col="red")
+#dev.off()
+
+# Filter out rows with sum less than 100
+sum_thr <- 30
+my_matrix_N_RNAseq_log2p1_filtered <- my_matrix_N_RNAseq_log2p1_sum[my_matrix_N_RNAseq_log2p1_sum$sum >= sum_thr,]
+nrow(my_matrix_N_RNAseq_log2p1_filtered)
+
+# Plot sum density after filtering
+plot(density(my_matrix_N_RNAseq_log2p1_filtered$sum))
+
+# Remove sum column
+my_matrix_N_RNAseq_log2p1_filtered$sum <- NULL
+
+# Plot sum density after filtering
+plot(density(as.matrix(head(my_matrix_N_RNAseq_log2p1_filtered))))
+
+# Scaling normalization
+my_bmatrix_N_RNAseq_log2p1_filtered_scaled <- scale(x = my_matrix_N_RNAseq_log2p1_filtered,
+                                                   center = TRUE,
+                                                   scale = TRUE
+                                                   )
+
+# Plot density after scaling
+plot(density(as.matrix(my_matrix_N_RNAseq_log2p1_filtered_scaled)))
+
+```
+
+#### Merge RNAseq and affy scaled data
+
+```{r merge_murine_affy_RNAseq_data}
+
+head(my_matrix_R_affy_scaled)
+nrow(my_matrix_R_affy_scaled)
+
+# Add gene symbol to affy matrix
+head(symbol_unfiltered_frame)
+
+my_matrix_R_affy_scaled_annot <- merge(x=symbol_unfiltered_frame,
+                                       y = my_matrix_R_affy_scaled,
+                                       by = 0,
+                                       all = FALSE
+                                       )
+rownames(my_matrix_R_affy_scaled_annot) <- my_matrix_R_affy_scaled_annot$symbol_unfiltered
+head(my_matrix_R_affy_scaled_annot)
+nrow(my_matrix_R_affy_scaled_annot)
+
+# Remove duplicated and NA symbol
+my_matrix_R_affy_scaled_annot <- my_matrix_R_affy_scaled_annot[!duplicated(my_matrix_R_affy_scaled_annot$symbol_unfiltered),]
+my_matrix_R_affy_scaled_annot <- my_matrix_R_affy_scaled_annot[!is.na(my_matrix_R_affy_scaled_annot$symbol_unfiltered),]
+nrow(my_matrix_R_affy_scaled_annot)
+
+rownames(my_matrix_R_affy_scaled_annot) <- my_matrix_R_affy_scaled_annot$symbol_unfiltered
+my_matrix_R_affy_scaled_annot$Row.names <- NULL
+my_matrix_R_affy_scaled_annot$symbol_unfiltered <- NULL
+head(my_matrix_R_affy_scaled_annot)
+
+head(my_matrix_R_RNAseq_log2p1_filtered_scaled)
+
+
+# Remove X before R matrix colnames (TODO: remove from RNAseq script!)
+colnames(my_matrix_R_RNAseq_log2p1_filtered_scaled) <- gsub("X","",colnames(my_matrix_R_RNAseq_log2p1_filtered_scaled))
+
+# Merge RNAseq and affy primary tumor matrix (FOR SVA ANALYSIS)
+my_matrix_murine_RNAseq_affy <- merge(x = my_matrix_R_affy_scaled_annot,
+                                      y = my_matrix_R_RNAseq_log2p1_filtered_scaled,
+                                      by = 0,
+                                      all = FALSE
+                                      )                                      
+
+rownames(my_matrix_murine_RNAseq_affy) <- my_matrix_murine_RNAseq_affy$Row.names
+my_matrix_murine_RNAseq_affy$Row.names <- NULL
+head(my_matrix_murine_RNAseq_affy)
+
+# Remove X before N matrix colnames (TODO: remove from RNAseq script!)
+colnames(my_matrix_N_RNAseq_log2p1_filtered_scaled) <- gsub("X","",colnames(my_matrix_N_RNAseq_log2p1_filtered_scaled))
+
+# Rename 43940.bisA sample to its original name (43940-bisA)
+colnames(my_matrix_N_RNAseq_log2p1_filtered_scaled)[ncol(my_matrix_N_RNAseq_log2p1_filtered_scaled)] <- "43940-bisA"
+
+# Merge RNAseq and affy primary tumor and Nestin RNAseq matrices
+my_matrix_murine_R_N_RNAseq_R_affy <- merge(x = my_matrix_murine_RNAseq_affy,
+                                            y = my_matrix_N_RNAseq_log2p1_filtered_scaled,
+                                            by = 0,
+                                            all = FALSE
+                                            )                                      
+
+rownames(my_matrix_murine_R_N_RNAseq_R_affy) <- my_matrix_murine_R_N_RNAseq_R_affy$Row.names
+my_matrix_murine_R_N_RNAseq_R_affy$Row.names <- NULL
+head(my_matrix_murine_R_N_RNAseq_R_affy)
+
+```
+
+#### Merge sample table
+
+```{r merge_R_sample_table}
+
+# Merge RNAseq and affy sample table
+samples_R_RNAseq_affy <- rbind(samples_R_RNAseq,
+                               samples_R_affy
+                               )
+samples_R_RNAseq_affy[,c("Data_type","Sample_name","group_name")]
+
+# Reorder to follow matrix colnames order
+samples_R_RNAseq_affy <- samples_R_RNAseq_affy[match(colnames(my_matrix_murine_RNAseq_affy), samples_R_RNAseq_affy$Sample_name),]
+
+samples_R_RNAseq_affy[,c("Data_type","Sample_name","group_name")]
+
+```
+
+```{r merge_RN_sample_table}
+
+# Merge RNAseq and affy sample table
+samples_R_N_RNAseq_R_affy <- rbind(samples_R_RNAseq_affy,
+                                   samples_N_RNAseq
+                                   )
+samples_R_N_RNAseq_R_affy[,c("Data_type","Sample_name","Genotype","group_name")]
+
+nrow(samples_R_N_RNAseq_R_affy)
+ncol(my_matrix_murine_R_N_RNAseq_R_affy)
+
+head(my_matrix_murine_R_N_RNAseq_R_affy)
+
+# Reorder to follow matrix colnames order
+samples_R_N_RNAseq_R_affy <- samples_R_N_RNAseq_R_affy[match(colnames(my_matrix_murine_R_N_RNAseq_R_affy), samples_R_N_RNAseq_R_affy$Sample_name),]
+
+samples_R_N_RNAseq_R_affy[,c("Data_type","Sample_name","Genotype","group_name")]
+
+```
+
+#### Check platform batch effect
+
+```{r check_batch_effect}
+
+# Most variable genes
+murine_RNAseq_affy_mvgenes <- genes.selection(data = my_matrix_murine_RNAseq_affy,
+                                              thres.num = 1000
+                                              )
+
+# Subset matrix
+my_matrix_murine_RNAseq_affy_mvgenes <- my_matrix_murine_RNAseq_affy[murine_RNAseq_affy_mvgenes,]
+
+# PCA before batch correction
+#pdf(paste0(pathToFigures,"pca_murine_affy_RNAseq.pdf"), width=12, height=12)
+plot_pca(matrix      = my_matrix_murine_RNAseq_affy_mvgenes,
+         category    = as.vector(samples_R_RNAseq_affy$Data_type),
+         plotInertia = FALSE,
+         addEllipses = FALSE,
+         axes        = c(1,2)
+         )
+#dev.off()
+
+```
+
+#### Remove batch effect using surrogate variable
+
+```{r remove_batch_effect}
+
+# Create null and full models
+my_full_model <- model.matrix(object = ~as.factor(group_name),
+                              data = samples_R_RNAseq_affy
+                              )
+
+my_null_model <- model.matrix(object = ~1,
+                              data = samples_R_RNAseq_affy
+                              )
+
+# Estimate the number of latent factor (surrogate varibles)
+nb_sv <- num.sv(dat = as.matrix(my_matrix_murine_RNAseq_affy),
+                mod = my_full_model,
+                method = "leek"
+                )
+nb_sv
+
+my_svobj <- sva(dat = as.matrix(my_matrix_murine_RNAseq_affy),
+             mod = my_full_model,
+             mod0 = my_null_model,
+             n.sv=nb_sv
+             )
+
+str(my_svobj)
+
+plot(density(my_svobj$pprob.gam))
+
+plot(density(my_svobj$pprob.b))
+
+my_matrix_murine_RNAseq_affy_tmp <- my_matrix_murine_RNAseq_affy
+my_matrix_murine_RNAseq_affy_tmp$pprob.gam <- my_svobj$pprob.gam
+
+head(my_matrix_murine_RNAseq_affy_tmp)
+
+pprob.gam_thr <- 0.5
+my_matrix_murine_RNAseq_affy_pprobFilt <- my_matrix_murine_RNAseq_affy_tmp[which(my_matrix_murine_RNAseq_affy_tmp$pprob.gam < pprob.gam_thr),]
+my_matrix_murine_RNAseq_affy_pprobFilt$pprob.gam <- NULL
+
+head(my_matrix_murine_RNAseq_affy_pprobFilt)
+nrow(my_matrix_murine_RNAseq_affy_pprobFilt)
+
+# PCA after batch correction
+#pdf(paste0(pathToFigures,"pca_murine_affy_RNAseq_batchCorr.pdf"), width=12, height=12)
+plot_pca(matrix      = my_matrix_murine_RNAseq_affy_pprobFilt,
+         category    = as.vector(samples_R_RNAseq_affy$Data_type),
+         plotInertia = FALSE,
+         addEllipses = FALSE,
+         axes        = c(1,2)
+         )
+#dev.off()
+
+```
+
+#### Complex heatmap human ATRT and murine
+
+```{r complesHeatmap_RNAseq_affy_ATRT}
+
+# Most variable genes
+murine_RNAseq_affy_pprobFilt_mvgenes <- genes.selection(data = my_matrix_murine_RNAseq_affy_pprobFilt,
+                                                        thres.num = 1000
+                                                        )
+
+# Subset matrix
+my_matrix_murine_RNAseq_affy_pprobFilt_mvgenes <- my_matrix_murine_RNAseq_affy_pprobFilt[murine_RNAseq_affy_pprobFilt_mvgenes,]
+
+samples_R_RNAseq_affy$Sample_name
+
+colnames(my_matrix_murine_RNAseq_affy_pprobFilt_mvgenes)
+
+# Top Annotation
+my_top_annot_murine_affy_RNAseq <- HeatmapAnnotation(df                      = data.frame(samples_R_RNAseq_affy[,c("Tamoxifen_date","Localization_of_primary_tumor")]),
+                                                     col                     = list(Localization_of_primary_tumor = localization_of_primary_tumor_col,
+                                                                                    Tamoxifen_date = tamoxifen_date_col
+                                                     ),
+                                                     gap                     = my_gap,
+                                                     show_annotation_name    = TRUE,
+                                                     annotation_name_gp      = my_annotation_name_gp,
+                                                     annotation_legend_param = my_annotation_legend_param,
+                                                     na_col = my_na_col,
+                                                     height = unit(2,"cm")
+                                                     )
+
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_affy_RNAseq.pdf"), width=16, height=18)
+#dev.new(height=16,width=8)
+Heatmap(matrix                      = my_matrix_murine_RNAseq_affy_pprobFilt_mvgenes,
+        clustering_distance_columns = my_dist,
+        clustering_method_columns   = my_meth,
+        clustering_distance_rows    = my_dist,
+        clustering_method_rows      = my_meth,
+        show_row_names              = FALSE,
+        column_title                = paste0("murine affymetrix and RNAseq primary tumors \n unsupervised clustering \n (distance: ",my_dist,", method: ",my_meth,")"),
+        column_title_gp             = gpar(fontsize = 20),
+        row_title                   = "1000 most variable genes",
+        top_annotation              = my_top_annot_murine_affy_RNAseq,
+        show_heatmap_legend         = FALSE,
+        column_dend_height          = my_column_dend_height,
+        column_names_gp             = gpar(fontsize = 20),
+        row_title_gp                = my_row_title_gp,
+        row_names_gp                = gpar(fontsize = 20)
+        )
+#dev.off()
+
+# Plot dendogram only
+colDend <- hclust(pearson.dist(t(my_matrix_murine_RNAseq_affy_pprobFilt_mvgenes)))
+[6~
+h <- Heatmap(matrix        = matrix(nrow= 0, ncol= ncol(my_matrix_murine_RNAseq_affy_pprobFilt_mvgenes)),
+             cluster_columns    = colDend,
+             top_annotation     = my_top_annot_murine_affy_RNAseq_bis,
+             column_dend_height = my_column_dend_height,
+             show_row_names     = TRUE,
+             column_names_gp    = gpar(fontsize = 14)
+             ) 
+
+draw(h, annotation_legend_side = "bottom")
+
+h <- Heatmap(matrix                 = my_matrix_murine_RNAseq_affy_pprobFilt_mvgenes,
+             clustering_distance_columns = "pearson",
+             clustering_method_columns   = my_meth,
+             rect_gp                     = gpar(type = "none"),
+             cluster_rows                = FALSE,
+             show_row_names              = FALSE,
+             column_title                = "Unsupervised clustering of murine tumors",
+             column_title_gp             = gpar(fontsize = 20),
+                                        #row_title                   = "1000 most variable genes",
+             top_annotation              = my_top_annot_murine_affy_RNAseq,
+             show_heatmap_legend         = FALSE,
+             column_names_side           = "top",
+             column_dend_height          = my_column_dend_height,
+             column_names_gp             = gpar(fontsize = 20),
+             row_title_gp                = my_row_title_gp,
+             row_names_gp                = gpar(fontsize = 20)
+             )
+# Add lengend on top annotation
+for(legend in c("Data_type","group_name","Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date"))
+{
+    decorate_annotation(legend, {
+    # Annotation names on the right
+        grid.text(legend, unit(1, "npc") + unit(10, "mm"), 0.5, default.units = "npc", just = "left")
+    })
+}
+
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_affy_RNAseq_withoutHeatmap.pdf"), width=18, height=8)
+draw(h, annotation_legend_side = "bottom")
+#dev.off()
+
+```

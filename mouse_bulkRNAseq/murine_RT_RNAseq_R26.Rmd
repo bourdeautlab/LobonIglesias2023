@@ -1,0 +1,1900 @@
+---
+title: "Murine MRT RNAseq data analysis"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 12
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+#renv::init()
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+pathToRpackages              <- paste0(pathToRhabdoid_U830_projects,"programmes/Rpackages/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToMurine_RT              <- paste0(pathToANALYSIS_PROJECTS,"murine_RT/")
+pathToData                   <- paste0(pathToANALYSIS_PROJECTS,"murine_RT/data/")
+pathToDEEPTOOLS              <- paste0(pathToANALYSIS_PROJECTS,"DEEPTOOLS/")
+pathTobed                    <- paste0(pathToMurine_RT,"BEDTOOLS/bamToBed")
+pathToUCSCTOOLS              <- paste0(pathToMurine_RT,"UCSC_TOOLS/")
+pathToFeatureCounts          <- paste0(pathToMurine_RT,"FeatureCounts/")
+pathToFigures                <- paste0(pathToMurine_RT,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToMurine_RT,"svn/analyse/report/")
+pathToGSEA_results           <- paste0(pathToReport,"GSEA_results/")
+
+```
+
+```{r load_library, eval=TRUE}
+
+source("load_RNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("murine_RT_RNAseq_R26.RData")
+
+#save.image(file="murine_RT_RNAseq_R26.RData")
+
+```
+
+```{r function_plot_files, eval=TRUE}
+
+source("/bioinfo/users/mandrian/rhabdoid_U830_projects/programmes/plot_functions.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+source("plot_R_util.R")
+
+```
+
+```{r data_file_annotation}
+
+# Import data file annotation (file containing all the data wih their respective description)
+sampleTable <- read_tsv(file      = paste0(pathToDataAnnotationFile,
+                                           "data_file_annotation.csv"
+                                           ),
+                        col_names = TRUE
+                        )
+sampleTable
+
+```
+
+# Curie R26 samples (in situ and allograft)
+
+## Select Curie R26 samples
+
+```{r data}
+
+# Selecting data for analysis 
+sample_Curie_R26_dbl <- filter(.data                = sampleTable,
+                           Biological_category == "transcriptomics",
+                           Data_source         == "Curie",
+                           Author_Researcher   == "Zhi-yan Han",
+                           Data_type           == "RNA_seq",
+                           Organism            == "Mus_musculus",
+                           Genotype            == "R26",
+                           File_format         == "FASTQ",
+                           include             == "YES"
+                           )
+sample_Curie_R26_dbl
+
+sample_Curie_R26 <- sample_Curie_R26_dbl[!duplicated(sample_Curie_R26_dbl$Sample_name),]
+
+# Data summary
+group_by(.data = sample_Curie_R26
+        #,Genotype
+        ,Tumor_origin
+        ,Localization_of_primary_tumor
+        ,sub_localization_of_primary_tumor
+        ,Tamoxifen_date
+        #,Date
+         ) %>%
+    summarise(number =  n()) %>%
+    print(n = nrow(.), width = Inf)
+
+```
+
+## Import raw count from RNApip result (sample plan input for RNApip was created in murine_RT_RNAseq.Rmd script)
+
+```{r rawCount}
+
+# Path to counts table for each sample
+counts_path_Curie <- paste(sample_Curie_R26$Sample_name, "counts",
+                           gsub(".fastq.gz","_norRNA_1ReadsPerGene.out.tab",sample_Curie_R26$File_name
+                                       ),
+                           sep = "/")
+counts_path_Curie
+
+# Create a colnames vector for raw counts output of STAR
+countTable_colnames <- c("ENS_gene_ID","unstranded", "forward","reverse")
+
+# RNApip output directory
+pathToRNApip_RESULT_Curie <- paste0(pathToMurine_RT,"RNApip_RESULT__Curie/")
+
+# Create a tibble with one column which contains the ensemble gene ID
+rawCounts_Curie_R26 <- read_tsv(file = paste0(pathToRNApip_RESULT_Curie,
+                                        counts_path_Curie[1]
+                                        ),
+                                    col_names = countTable_colnames,
+                                    skip = 4
+                                    ) %>%
+    dplyr::select(-unstranded, -forward, -reverse)
+for (sample in counts_path_Curie)
+{
+    tmp <- read_tsv(file      = paste0(pathToRNApip_RESULT_Curie,sample),
+                    col_names = countTable_colnames,
+                    skip      = 4
+                    ) %>% dplyr::select(reverse
+                                        )
+    colnames(tmp) <- gsub("/counts/.+R1_norRNA_1ReadsPerGene.out.tab",
+                          "",
+                          sample,
+                          perl = TRUE
+                          )
+    rawCounts_Curie_R26 <- bind_cols(rawCounts_Curie_R26, tmp)
+}
+
+rawCounts_Curie_R26
+
+# Convert ENS_gene_ID into rownames
+rawCounts_Curie_R26             <- data.frame(rawCounts_Curie_R26, check.names = FALSE)
+rownames(rawCounts_Curie_R26)   <- rawCounts_Curie_R26$ENS_gene_ID
+rawCounts_Curie_R26$ENS_gene_ID <- NULL
+head(rawCounts_Curie_R26)
+
+# Check order
+sample_Curie_R26$Sample_name == colnames(rawCounts_Curie_R26)
+
+# Export table
+write.table(x          = sample_Curie_R26,
+            file       = paste0(pathToReport,"sample_murine_RNAseq_Curie_R26.csv"),
+            sep        = ";",
+            quote      = FALSE,
+            row.names  = FALSE
+            )
+
+# Copy to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"sample_murine_RNAseq_Curie_R26.csv"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+# Export table
+write.table(x          = rownames_to_column(.data = rawCounts_Curie_R26, "gene"),
+            file       = paste0(pathToReport,"matrix_rawCounts_murine_RNAseq_Curie_R26.txt"),
+            sep        = "\t",
+            quote      = FALSE,
+            row.names  = FALSE
+            )
+
+# Copy to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"matrix_rawCounts_murine_RNAseq_Curie_R26.txt"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+## Data pre-processing
+
+### Filtering out 0 lines
+
+```{r remove_zeroLines}
+
+# Remove all lines where counts are all equal to zero
+nrow(rawCounts_Curie_R26)
+rawWZ_Curie_R26 <- rawCounts_Curie_R26[apply(rawCounts_Curie_R26, 1, function(x) !all(x==0)),]
+
+head(rawWZ_Curie_R26)
+nrow(rawWZ_Curie_R26)
+
+```
+
+## Exploratory analysis 
+
+### Counts normalization with rlog transformation (DESeq2) 
+
+```{r rlog}
+
+# Convert raw counts to matrix and create countdata
+countdata_Curie_R26 <- as.matrix(rawWZ_Curie_R26)
+head(countdata_Curie_R26)
+
+# Check order
+sample_Curie_R26$Sample_name == colnames(countdata_Curie_R26)
+
+# Create DESeq object for each sample (dds)
+dds_Curie_R26 <- DESeqDataSetFromMatrix(countData = countdata_Curie_R26,
+                                        colData   = sample_Curie_R26,
+                                        design    = ~ 1
+                                        )
+
+# Stabilize variance using rlog
+rld_Curie_R26 <- rlog(object = dds_Curie_R26,
+                  blind  = TRUE
+                  )
+matrix_rld_Curie_R26 <- assay(rld_Curie_R26)
+head(matrix_rld_Curie_R26[,1:4])
+
+# Export as RData
+save(matrix_rld_Curie_R26,
+     file = paste0(pathToReport,"matrix_murine_RNAseq_Curie_R26_rlog.RData")
+     )
+
+# Export as csv
+write.table(x     = matrix_rld_Curie_R26,
+            file  = paste0(pathToReport,"matrix_murine_RNAseq_Curie_R26_rlog.csv"),
+            quote = FALSE,
+            sep   = ";"
+            )
+
+# Export rlog matrix as list
+mouse_Curie_R26_RNAseq_list <- list(matrixRawCounts  = as.matrix(rawWZ_Curie_R26),
+                                matrixRld        = matrix_rld_Curie_R26,
+                                sampleTable      = sample_Curie_R26
+                                )
+
+save(mouse_Curie_R26_RNAseq_list,file="mouse_Curie_R26_RNAseq_list.RData")
+
+```
+
+### Feature selection (Most variable genes)
+
+```{r mostVariableGenes}
+
+# Most variable genes
+mvgenes_Curie_R26 <- genes.selection(data = matrix_rld_Curie_R26,
+                                     thres.num = 1000
+                                     )
+
+# Subset matrix
+matrix_rld_Curie_R26_mvgenes <- matrix_rld_Curie_R26[mvgenes_Curie_R26,]
+
+```
+
+### PCA
+
+```{r PCA_Curie_EPIC}
+
+# Plot PCA (PC1 and PC2) and date
+#pdf(paste0(pathToFigures,"pca_murine_RNAseq_rlog_Curie_date.pdf"), width=16, height=12)
+pca_func(matrix                      = matrix_rld_Curie_R26_mvgenes,
+         sampleTable                 = sample_Curie_R26,
+         highlightedVar              = 'Date',
+         highlightedVarName          = 'Date',#highlightedVar,
+         colors                      = NULL,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointSize                   = 10
+         )
+#dev.off()
+
+# Plot PCA (PC1 and PC2) and tumor technical plateform
+#pdf(paste0(pathToFigures,"pca_murine_RNAseq_rlog_Curie_technicalPlateform.pdf"), width=16, height=12)
+pca_func(matrix                      = matrix_rld_Curie_R26_mvgenes,
+         sampleTable                 = sample_Curie_R26,
+         highlightedVar              = 'Technical_plateform',
+         highlightedVarName          = 'Technical plateform',#highlightedVar,
+         colors                      = NULL,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointSize                   = 10
+         )
+#dev.off()
+
+# Plot PCA (PC1 and PC2) and tumor origin
+#pdf(paste0(pathToFigures,"pca_murine_RNAseq_rlog_Curie_tumorOrigin.pdf"), width=16, height=12)
+pca_func(matrix                      = matrix_rld_Curie_R26_mvgenes,
+         sampleTable                 = sample_Curie_R26,
+         highlightedVar              = 'Tumor_origin',
+         highlightedVarName          = 'Tumor_origin',#highlightedVar,
+         colors                      = tumor_origin_col,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointSize                   = 10
+         )
+#dev.off()
+
+# Plot PCA (PC1 and PC2) and tumor localization
+#pdf(paste0(pathToFigures,"pca_murine_RNAseq_rlog_Curie_localization.pdf"), width=16, height=12)
+pca_func(matrix                      = matrix_rld_Curie_R26_mvgenes,
+         sampleTable                 = sample_Curie_R26,
+         highlightedVar              = 'Localization_of_primary_tumor',
+         highlightedVarName          = 'Location',#highlightedVar,
+         colors                      = localization_of_primary_tumor_col,#NULL,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointSize                   = 10
+         )
+#dev.off()
+
+# Plot PCA (PC1 and PC2) and tumor sub-localization
+#pdf(paste0(pathToFigures,"pca_murine_RNAseq_rlog_Curie_subLocalization.pdf"), width=16, height=12)
+pca_func(matrix                      = matrix_rld_Curie_R26_mvgenes,
+         sampleTable                 = sample_Curie_R26,
+         highlightedVar              = 'sub_localization_of_primary_tumor',
+         highlightedVarName          = 'sub-location',#highlightedVar,
+         colors                      = sub_localization_of_primary_tumor_col,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointSize                   = 10
+         )
+#dev.off()
+
+# Plot PCA (PC1 and PC2) and tumor sub-localization
+#pdf(paste0(pathToFigures,"pca_murine_RNAseq_rlog_Curie_tamoxifenDate.pdf"), width=16, height=12)
+pca_func(matrix                      = matrix_rld_Curie_R26_mvgenes,
+         sampleTable                 = sample_Curie_R26,
+         highlightedVar              = 'Tamoxifen_date',
+         highlightedVarName          = 'Tamoxifen\ndate',#highlightedVar,
+         colors                      = tamoxifen_date_col,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointSize                   = 10
+         )
+#dev.off()
+
+```
+
+### Hierarchical clustering
+
+```{r heatmap_R26_primaryTum}
+
+top_annot_R26 <- createTopAnnot_func(sampleTable = transmute(data.frame(sample_Curie_R26[,c("Tumor_origin","Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date")]),
+                                                             Tumor_origin = Tumor_origin,
+                                                             location = Localization_of_primary_tumor,
+                                                             sub_location = sub_localization_of_primary_tumor,
+                                                             tamoxifen = Tamoxifen_date
+                                                             ),
+                                     columns               = c("Tumor_origin","location","sub_location","tamoxifen"),
+                                     colorsList = list(tumor_origin_col,localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col,tamoxifen_date_col),
+                                     show_legend           = TRUE,
+                                     height                = 2,
+                                     legend_ncol           = 1,
+                                     fontsize              = 20,
+                                     show_annotation_name  = TRUE
+                                     )
+
+
+# Plot hierarchical clustering and heatmap
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_RNAseq_R26.pdf"), width=16, height=12)
+drawHeatmap_func(matrix               = matrix_rld_Curie_R26_mvgenes,
+                 column_title         = "R26 (in situ and allograft) samples",
+                 row_title            = "1000 most variable genes (IQR)",
+                 top_annot            = top_annot_R26,
+                 row_annot            = NULL,
+                 bottom_annot         = NULL,
+                 legend_title         = "rlog",
+                 show_column_names    = TRUE,
+                 show_row_names       = FALSE,
+                 add_column_dend_axis = FALSE,
+                 columns_dist         = "pearson",
+                 columns_meth         = "ward",
+                 cluster_columns      = TRUE,
+                 cluster_rows         = TRUE,
+                 rows_dist            = "euclidean",
+                 rows_meth            = "ward",
+                 fontsize             = 20,
+                 split                = NULL,
+                 annotation_legend_side = "bottom"
+                 )
+#dev.off()
+
+```
+
+# Curie R26 in situ samples
+
+## Select Curie R26 in situ samples
+
+```{r data}
+
+# Select R26 in situ sample
+sample_Curie_R26_primTum <- filter(.data = sample_Curie_R26,
+                                   Tumor_origin == 'primary_tumor'
+                                   )
+
+# Data summary
+group_by(.data = sample_Curie_R26_primTum
+        #,Genotype
+        ,Tumor_origin
+        ,Localization_of_primary_tumor
+        ,sub_localization_of_primary_tumor
+        ,Tamoxifen_date
+        #,Date
+         ) %>%
+    summarise(number =  n()) %>%
+    print(n = nrow(.), width = Inf)
+
+```
+
+## Subset raw count matrix of R26 in situ sample
+
+```{r subset_matrix}
+
+# Subset matrix
+rawCounts_Curie_R26_primTum <- rawCounts_Curie_R26[,sample_Curie_R26_primTum$Sample_name]
+
+head(rawCounts_Curie_R26_primTum)
+dim(rawCounts_Curie_R26_primTum)
+
+# Export raw counts for figshare (for Lobon-Iglesias et al., 2022)
+write.table(x          = rownames_to_column(.data = rawCounts_Curie_R26_primTum,"symbol"),
+            file       = paste0(pathToReport,"matrix_mouse_R26_primaryRT_RNAseq_rawCounts.txt"),
+            sep        = "\t",
+            row.names  = FALSE,
+            quote      = FALSE
+            )
+
+# Prepare sample plan for data deposition
+samplePlan_mouse_R26_primaryRT_RNAseq <- sample_Curie_R26_primTum[,c("Sample_name","Patient_ID","Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date","File_name")]
+samplePlan_mouse_R26_primaryRT_RNAseq <- mutate(.data         = samplePlan_mouse_R26_primaryRT_RNAseq,
+                                                mouse_ID      = Patient_ID,
+                                                location      = Localization_of_primary_tumor,
+                                                sub_location  = sub_localization_of_primary_tumor,
+                                                #filePath      = paste0(Storage_dir1,File_name),
+                                                .keep         = "unused"
+                                                )
+
+# Export sample plan for figshare (for Lobon-Iglesias et al., 2022)
+write.table(x          = samplePlan_mouse_R26_primaryRT_RNAseq,
+            file       = paste0(pathToReport,"samplePlan_mouse_R26_primaryRT_RNAseq.csv"),
+            sep        = ",",
+            row.names  = FALSE,
+            quote      = FALSE
+            )
+
+# Copy fastq files
+sample_Curie_R26_primTum_dbl <- filter(.data = sample_Curie_R26_dbl,
+                                       Tumor_origin == 'primary_tumor'
+                                       )
+
+nrow(sample_Curie_R26_primTum_dbl)
+
+mutate(.data = sample_Curie_R26_primTum_dbl,
+       path = paste0(Storage_dir1,File_name)
+       ) %>%
+    dplyr::select(Patient_ID,
+                  path
+                  ) %>%
+write.table(file = paste0(pathToReport,"Curie_R26_primTum_copyInputFile.csv"),
+            col.names = FALSE,
+            row.names = FALSE,
+            quote = FALSE,
+            sep = ";"
+            )
+
+```
+
+## Data pre-processing
+
+### Filtering out 0 lines
+
+```{r remove_zeroLines}
+
+# Remove all lines where counts are all equal to zero
+nrow(rawCounts_Curie_R26_primTum)
+rawWZ_Curie_R26_primTum <- rawCounts_Curie_R26_primTum[apply(rawCounts_Curie_R26_primTum, 1, function(x) !all(x==0)),]
+
+head(rawWZ_Curie_R26_primTum)
+nrow(rawWZ_Curie_R26_primTum)
+
+```
+
+## Exploratory analysis 
+
+### Variance stabilization using rlog transformation (DESeq2) 
+
+```{r rlog}
+
+# Convert raw counts to matrix and create countdata
+countdata_Curie_R26_primTum <- as.matrix(rawWZ_Curie_R26_primTum)
+head(countdata_Curie_R26_primTum)
+
+# Check order
+sample_Curie_R26_primTum$Sample_name == colnames(countdata_Curie_R26_primTum)
+
+# Create DESeq object for each sample (dds)
+dds_Curie_R26_primTum <- DESeqDataSetFromMatrix(countData = countdata_Curie_R26_primTum,
+                                                colData   = sample_Curie_R26_primTum,
+                                                design    = ~ 1
+                                                )
+
+# Stabilize variance using rlog
+rld_Curie_R26_primTum <- rlog(object = dds_Curie_R26_primTum,
+                              blind  = TRUE
+                              )
+matrix_rld_Curie_R26_primTum <- assay(rld_Curie_R26_primTum)
+head(matrix_rld_Curie_R26_primTum[,1:4])
+
+# Export as RData
+save(matrix_rld_Curie_R26_primTum,
+     file = paste0(pathToReport,"matrix_murine_RNAseq_Curie_R26_primTum_rlog.RData")
+     )
+
+# Export as csv
+write.table(x     = matrix_rld_Curie_R26_primTum,
+            file  = paste0(pathToReport,"matrix_murine_RNAseq_Curie_R26_primTum_rlog.csv"),
+            quote = FALSE,
+            sep   = ";"
+            )
+
+# Export rlog matrix as list
+mouse_Curie_R26_primTum_RNAseq_list <- list(matrixRawCounts  = as.matrix(rawWZ_Curie_R26_primTum),
+                                            matrixRld        = matrix_rld_Curie_R26_primTum,
+                                            sampleTable      = sample_Curie_R26_primTum
+                                            )
+
+save(mouse_Curie_R26_primTum_RNAseq_list,file="mouse_Curie_R26_primTum_RNAseq_list.RData")
+
+```
+
+### Feature selection (Most variable genes)
+
+```{r mostVariableGenes}
+
+# Most variable genes
+mvgenes_Curie_R26_primTum <- genes.selection(data       = matrix_rld_Curie_R26_primTum,
+                                             thres.num  = 1000
+                                             )
+
+# Subset matrix
+matrix_rld_Curie_R26_primTum_mvgenes <- matrix_rld_Curie_R26_primTum[mvgenes_Curie_R26_primTum,]
+
+```
+
+### Hierarchical clustering
+
+```{r heatmap_R26_primaryTum}
+
+# Top annotation
+top_annot_R26_primTum <- createTopAnnot_func(sampleTable = transmute(data.frame(sample_Curie_R26_primTum[,c("Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date")]),
+                                                                     location = Localization_of_primary_tumor,
+                                                                     sub_location = sub_localization_of_primary_tumor,
+                                                                     tamoxifen = Tamoxifen_date
+                                                                     ),
+                                     columns               = c("location","sub_location","tamoxifen"),
+                                     colorsList = list(localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col,tamoxifen_date_col),
+                                     show_legend           = TRUE,
+                                     height                = 2,
+                                     legend_ncol           = 1,
+                                     fontsize              = 20,
+                                     show_annotation_name  = TRUE
+                                     )
+
+
+# Plot hierarchical clustering and heatmap
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_RNAseq_R26_primTum.pdf"), width=14, height=12)
+drawHeatmap_func(matrix               = matrix_rld_Curie_R26_primTum_mvgenes,
+                 column_title         = "R26 (in situ) samples",
+                 row_title            = "\n1000 most variable genes (IQR)",
+                 top_annot            = top_annot_R26_primTum,
+                 row_annot            = NULL,
+                 bottom_annot         = NULL,
+                 legend_title         = "rlog",
+                 show_column_names    = TRUE,
+                 show_row_names       = FALSE,
+                 add_column_dend_axis = FALSE,
+                 columns_dist         = "pearson",
+                 columns_meth         = "ward",
+                 cluster_columns      = TRUE,
+                 cluster_rows         = TRUE,
+                 rows_dist            = "euclidean",
+                 rows_meth            = "ward",
+                 fontsize             = 20,
+                 split                = NULL,
+                 annotation_legend_side = "bottom"
+                 )
+#dev.off()
+
+# Plot average silhouette
+#pdf(paste0(pathToFigures,"averageSilhouette_murine_RNAseq_R26_primTum.pdf"), width=12, height=12)
+average_silhouette_func(matrix = matrix_rld_Curie_R26_primTum_mvgenes, max_class = 6)
+#dev.off()
+
+# Consensus clustering
+ConsensusClusterPlus(d          = as.matrix(matrix_rld_Curie_R26_primTum_mvgenes),
+                     maxK       = 6,
+                     reps       = 1000,
+                     pItem      = 0.8,
+                     pFeature   = 0.8,
+                     clusterAlg = "hc",
+                     title      = "ConsClust_murine_Curie_R26_RNAseq",
+                     distance   = "pearson",
+                     plot       = "pdf"
+                     )
+
+```
+
+### Assign subgroup name to R26 primary tumors clustering result
+
+```{r assign_R26_primaryTum}
+
+# Assign subgroups
+sample_Curie_R26_primTum_plus <- assignGroups_func(matrix = matrix_rld_Curie_R26_primTum_mvgenes,
+                                                   sampleTable = sample_Curie_R26_primTum,
+                                                   distance          = "pearson",
+                                                   method            = "ward",
+                                                   k                 = 2,
+                                                   group_names       = c("neuronal","non_neuronal"),
+                                                   group_num_column  = "group_num",
+                                                   group_name_column = "group_name",
+                                                   silhouette        = FALSE
+                                                   )
+
+# Check results
+sample_Curie_R26_primTum_plus$group_name
+
+# Export sample plan
+write.table(x          = sample_Curie_R26_primTum_plus,
+            file       = "sample_Curie_R26_primTum.csv",
+            quote      = FALSE,
+            sep        = "\t"
+            )
+
+# Save R26 primary tumor matrix and sample table
+murine_Curie_R26_primTum_RNAseq_list <- list(matrix = matrix_rld_Curie_R26_primTum,
+                                             sampleTable = sample_Curie_R26_primTum_plus
+                                             )
+save(murine_Curie_R26_primTum_RNAseq_list, file = "murine_Curie_R26_primTum_RNAseq_list.RData")
+
+```
+
+### Hierarchical clustering of assigned samples
+
+```{r heatmap_R26_primaryTum}
+
+# Top annotation
+top_annot_R26_primTum_plus <- createTopAnnot_func(sampleTable = transmute(data.frame(sample_Curie_R26_primTum_plus[,c("group_name","Localization_of_primary_tumor","sub_localization_of_primary_tumor","Tamoxifen_date")]),
+                                                                          subgroup=  group_name,
+                                                                          location = Localization_of_primary_tumor,
+                                                                          sub_location = sub_localization_of_primary_tumor,
+                                                                          tamoxifen = Tamoxifen_date
+                                                                          ),
+                                                  columns               = c("subgroup","location","sub_location","tamoxifen"),
+                                                  colorsList = list(group_name_col,localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col,tamoxifen_date_col),
+                                                  show_legend           = TRUE,
+                                                  height                = 2,
+                                                  legend_ncol           = 1,
+                                                  fontsize              = 20,
+                                                  show_annotation_name  = TRUE
+                                                  )
+
+
+# Plot hierarchical clustering and heatmap
+#pdf(paste0(pathToFigures,"complexHeatmap_murine_RNAseq_R26_primTum_assign.pdf"), width=16, height=12)
+drawHeatmap_func(matrix               = matrix_rld_Curie_R26_primTum_mvgenes,
+                 column_title         = "R26 (in situ) samples",
+                 row_title            = "\n1000 most variable genes (IQR)",
+                 top_annot            = top_annot_R26_primTum_plus,
+                 row_annot            = NULL,
+                 bottom_annot         = NULL,
+                 legend_title         = "rlog",
+                 show_column_names    = TRUE,
+                 show_row_names       = FALSE,
+                 add_column_dend_axis = FALSE,
+                 columns_dist         = "pearson",
+                 columns_meth         = "ward",
+                 cluster_columns      = TRUE,
+                 cluster_rows         = TRUE,
+                 rows_dist            = "euclidean",
+                 rows_meth            = "ward",
+                 fontsize             = 20,
+                 split                = NULL,
+                 annotation_legend_side = "bottom"
+                 )
+#dev.off()
+
+```
+
+### UMAP
+
+```{r UMAP_Curie_EPIC}
+
+# Plot UMAP (PC1 and PC2) and subgroup
+#pdf(paste0(pathToFigures,"umap_murine_RNAseq_rlog_Curie_subgroup.pdf"), width=16, height=12)
+umap_func(matrix                      = matrix_rld_Curie_R26_primTum_mvgenes,
+         sampleTable                 = sample_Curie_R26_primTum_plus,
+         highlightedVar              = 'group_name',
+         highlightedVarName          = 'subgroup',#highlightedVar,
+         colors                      = group_name_col,#NULL,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointsize                   = 10
+         )
+#dev.off()
+
+# Plot UMAP (PC1 and PC2) and tumor localization
+#pdf(paste0(pathToFigures,"umap_murine_RNAseq_rlog_Curie_localization.pdf"), width=16, height=12)
+umap_func(matrix                      = matrix_rld_Curie_R26_primTum_mvgenes,
+         sampleTable                 = sample_Curie_R26_primTum_plus,
+         highlightedVar              = 'Localization_of_primary_tumor',
+         highlightedVarName          = 'Location',#highlightedVar,
+         colors                      = localization_of_primary_tumor_col,#NULL,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointsize                   = 10
+         )
+#dev.off()
+
+# Plot UMAP (PC1 and PC2) and tumor sub-localization
+#pdf(paste0(pathToFigures,"umap_murine_RNAseq_rlog_Curie_subLocalization.pdf"), width=16, height=12)
+umap_func(matrix                      = matrix_rld_Curie_R26_primTum_mvgenes,
+         sampleTable                 = sample_Curie_R26_primTum_plus,
+         highlightedVar              = 'sub_localization_of_primary_tumor',
+         highlightedVarName          = 'sub-location',#highlightedVar,
+         colors                      = sub_localization_of_primary_tumor_col,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointsize                   = 10
+         )
+#dev.off()
+
+# Plot UMAP (PC1 and PC2) and tumor sub-localization
+#pdf(paste0(pathToFigures,"umap_murine_RNAseq_rlog_Curie_tamoxifenDate.pdf"), width=16, height=12)
+umap_func(matrix                      = matrix_rld_Curie_R26_primTum_mvgenes,
+         sampleTable                 = sample_Curie_R26_primTum_plus,
+         highlightedVar              = 'Tamoxifen_date',
+         highlightedVarName          = 'Tamoxifen\ndate',#highlightedVar,
+         colors                      = tamoxifen_date_col,
+         sampleLabel                 = NULL,
+         sampleLabelColumnCondition  = NULL,
+         sampleLabelValueCondition   = NULL,
+         pointsize                   = 10
+         )
+#dev.off()
+
+```
+
+## Differential expression analysis
+
+```{r diff_analysis_neural_vs_nonNeural}
+
+# Check order
+all(rownames(sample_Curie_R26_primTum_plus$Sample_name) == colnames(countdata_Curie_R26_primTum))
+
+# Create DESeq object for each sample (dds)
+dds_Curie_R26_primTum_plus <- DESeqDataSetFromMatrix(countData = countdata_Curie_R26_primTum,
+                                                     colData   = sample_Curie_R26_primTum_plus,
+                                                     design    = ~ group_name
+                                                     )
+
+# Create DESeq object
+deseq_Curie_R26_primTum <- DESeq(dds_Curie_R26_primTum_plus)
+
+# Extract results
+res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal <- results(deseq_Curie_R26_primTum,
+                                                           contrast=c("group_name",
+                                                                      "neuronal",
+                                                                      "non_neuronal"
+                                                                      )
+                                                           ) %>%
+    as.data.frame()
+head(res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal)
+
+# Add symbol column
+res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal$symbol <- rownames(res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal)
+head(res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal)
+
+# Plot histogram of p-value
+#pdf(paste0(pathToFigures,"hist_pvalue_murine_RNAseq_R26_primTum_neuronal_vs_nonNeuronal.pdf"), width=12, height=12)
+ggplot(data = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal,
+       mapping = aes(x = pvalue)
+       ) +
+    geom_histogram(fill="white", color="black") +
+    ggtitle(label = "Histogram of p-value")+
+    theme_bw() +
+    theme(text = element_text(size = 30)
+          )
+#dev.off()
+
+# Plot density of log2 fold-change
+#pdf(paste0(pathToFigures,"density_log2FoldChange_murine_RNAseq_R26_primTum_neuronal_vs_nonNeuronal.pdf"), width=12, height=12)
+ggplot(data = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal,
+       mapping = aes(x = log2FoldChange)
+       ) +
+    geom_density(color="black") +
+    ggtitle(label = "Density distribution of log2(fold-change)")+
+    theme_bw() +
+    theme(text = element_text(size = 30)
+          )
+#dev.off()
+
+# Export result
+write.table(x         = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal,
+            file      = paste0(pathToReport,"res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal.csv"),
+            quote     = FALSE,
+            sep       = "\t",
+            row.names = FALSE,
+            dec       = "."
+            )
+
+write.csv(x         = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal,
+          file      = paste0(pathToReport,"res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal.csv"),
+          quote     = FALSE
+          )
+
+# Copy to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal.csv"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+# Volcano plot
+#pdf(paste0(pathToFigures,"volcano_murine_RNAseq_R26_primTum_neuronal_vs_nonNeuronal.pdf"), width=14, height=10)
+plot_volcano_DESeq2(DESeq2_result  = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal,
+                    title          = "neuronal vs non-neuronal",
+                    subtitle       = "",
+                    geneSup        = c("Shh", "Myc","Tyr"),
+                    geneSup_arrowLength  = 2,
+                    gene_set       = filter(.data = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal,
+                                            log10(padj) < -10,
+                                            abs(log2FoldChange) > 5
+                                            )$symbol,
+                    gene_set_label = TRUE,
+                    gene_set_pointSize = 2,
+                    padj_cutoff        = 0.01,
+                    log2FC_cutoff      = 2,
+                    xlim = c(-15,15)
+                    )
+#dev.off()
+
+```
+
+## Functional enrichment analysis
+
+### Overlap analysis
+
+```{r overlap_GOBP_neuronal_DEG}
+
+# Select neuronal up-regulated genes
+res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_UP <- filter(.data = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal,
+                                                                 log10(padj) < -10,
+                                                                 log2FoldChange > 5
+                                                                 )$symbol
+length(res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_UP)
+
+# Export gene set
+write.table(x          = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_UP,
+            file       = paste0(pathToReport,"MSigDB_overlap/res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_UP.txt"),
+            sep        = "\n",
+            quote      = FALSE,
+            col.names  = FALSE,
+            row.names = FALSE
+            )
+
+# Barplot of overlap result
+#pdf(paste0(pathToFigures,"barplot_MSigDB_GOBP_res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_UP.pdf"), width=18, height=12)
+plot_top_MSigDB_GO_enriched_geneSets_func(paste0(pathToReport,"MSigDB_overlap/MSigDB_GOBP_res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_UP.tsv"),
+                                          sep = "\t",
+                                          top               = 10,
+                                          title             = "R26 neuronal\n",
+                                          xlim              = 40,
+                                          quote             = NULL,
+                                          selected_geneSet  = NULL,
+                                          fill              = "blue",
+                                          format_labels     = TRUE,
+                                          fontsize          = 20,#paperFig_fontsize,
+                                          label_fontsize    = 30,#paperFig_fontsize,
+                                          prefix            = "GOBP"
+                                         )
+#dev.off()
+
+```
+
+```{r r overlap_GOBP_nonNeuronal_DEG}
+
+# Select neuronal up-regulated genes
+res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_DOWN <- filter(.data = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal,
+                                                                   log10(padj) < -10,
+                                                                   log2FoldChange < -5
+                                                                 )$symbol
+length(res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_DOWN)
+
+# Export gene set
+write.table(x          = res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_DOWN,
+            file       = paste0(pathToReport,"MSigDB_overlap/res_deseq_Curie_R26_primTum_neuronal_vs_non[6~Neuronal_DOWN.txt"),
+            sep        = "\n",
+            quote      = FALSE,
+            col.names  = FALSE,
+            row.names = FALSE
+            )
+
+# Barplot of overlap result
+#pdf(paste0(pathToFigures,"barplot_MSigDB_GOBP_res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_DOWN.pdf"), width=18, height=12)
+plot_top_MSigDB_GO_enriched_geneSets_func(paste0(pathToReport,"MSigDB_overlap/MSigDB_GOBP_res_deseq_Curie_R26_primTum_neuronal_vs_nonNeuronal_DOWN.tsv"),
+                                          sep               = "\t",
+                                          top               = 10,
+                                          title             = "R26 non-neuronal\n",
+                                          xlim              = 40,
+                                          quote             = NULL,
+                                          selected_geneSet  = NULL,
+                                          fill              = "blue",
+                                          format_labels     = TRUE,
+                                          fontsize          = 20,#paperFig_fontsize,
+                                          label_fontsize    = 30,#paperFig_fontsize,
+                                          prefix            = "GOBP"
+                                         )
+#dev.off()
+
+```
+
+### GSEA analysis
+
+```{r gsea_murine_RT}
+
+# Check order
+sample_Curie_R26_primTum_plus$Sample_name == colnames(matrix_rld_Curie_R26_primTum)
+
+# Create class file
+createGSEAclsFormat_func(class = sample_Curie_R26_primTum_plus$group_name,
+                         classFileName = paste0(pathToReport,"GSEA_analysis/sample_Curie_R26_primTum_group_name.cls")
+                         )
+
+# Create gct file
+createGSEAgctFormat_func(matrix = matrix_rld_Curie_R26_primTum,
+                         gctFileName = paste0(pathToReport,"GSEA_analysis/matrix_rld_Curie_R26_primTum.gct")
+                         )
+
+# Barplot of GSEA results (all MSigDB)
+#pdf(paste0(pathToFigures,"barplot_GSEA_MSigDB_all_Curie_R26_primTum_neuronal.pdf"), width=18, height=12)
+barplotGSEA_func(GSEAresult = paste0(pathToReport,"GSEA_results/GSEA_MSigDB_all_murine_R26_primTum_neuronal_vs_nonNeuronal.Gsea.1649964480277/gsea_report_for_neuronal_1649964480277.xls"),
+                 top               = 20,
+                 format_labels     = TRUE,
+                 wordsLength       = 4,
+                 #prefix            = "GOBP",
+                 fontsize          = 20,
+                 alpha             = 0.3,
+                 show_FDR          = TRUE,
+                 xlim              = NULL,
+                 ylim              = NULL,
+                 selected_geneSet  = NULL,
+                 fill              = "darkgreen"
+                                        #sep              = "\t"
+                 )
+#dev.off()
+
+#pdf(paste0(pathToFigures,"barplot_GSEA_MSigDB_all_Curie_R26_primTum_nonNeuronal.pdf"), width=18, height=12)
+barplotGSEA_func(GSEAresult = paste0(pathToReport,"GSEA_results/GSEA_MSigDB_all_murine_R26_primTum_neuronal_vs_nonNeuronal.Gsea.1649964480277/gsea_report_for_non_neuronal_1649964480277.xls"),
+                 top               = 20,
+                 format_labels     = TRUE,
+                 wordsLength       = 4,
+                 #prefix            = "GOBP",
+                 fontsize          = 20,
+                 alpha             = 0.3,
+                 show_FDR          = TRUE,
+                 xlim              = NULL,
+                 ylim              = NULL,
+                 selected_geneSet  = NULL,
+                 fill              = "darkgreen"
+                                        #sep              = "\t"
+                 )
+#dev.off()
+
+# Barplot of GSEA results (all GOBP)
+#pdf(paste0(pathToFigures,"barplot_GSEA_MSigDB_GO_Curie_R26_primTum_neuronal.pdf"), width=18, height=12)
+barplotGSEA_func(GSEAresult = paste0(pathToReport,"GSEA_results/GSEA_MSigDB_GO_murine_R26_primTum_neuronal_vs_nonNeuronal.Gsea.1649964524187/gsea_report_for_neuronal_1649964524187.xls"),
+                 top               = 15,
+                 format_labels     = TRUE,
+                 wordsLength       = 4,
+                 #prefix            = "GOBP",
+                 fontsize          = 20,
+                 alpha             = 0.3,
+                 show_FDR          = TRUE,
+                 xlim              = NULL,
+                 ylim              = NULL,
+                 selected_geneSet  = NULL,
+                 fill              = "darkgreen"
+                                        #sep              = "\t"
+                 )
+#dev.off()
+
+#pdf(paste0(pathToFigures,"barplot_GSEA_MSigDB_GO_Curie_R26_primTum_nonNeuronal.pdf"), width=18, height=12)
+barplotGSEA_func(GSEAresult = paste0(pathToReport,"GSEA_results/GSEA_MSigDB_GO_murine_R26_primTum_neuronal_vs_nonNeuronal.Gsea.1649964524187/gsea_report_for_non_neuronal_1649964524187.xls"),
+                 top               = 15,
+                 format_labels     = TRUE,
+                 wordsLength       = 4,
+                 #prefix            = "GOBP",
+                 fontsize          = 20,
+                 alpha             = 0.3,
+                 show_FDR          = TRUE,
+                 xlim              = NULL,
+                 ylim              = NULL,
+                 selected_geneSet  = NULL,
+                 fill              = "darkgreen"
+                                        #sep              = "\t"
+                 )
+#dev.off()
+
+```
+
+### Single sample GSEA analysis (using GSVA: Gene Set Variation Analysis)
+
+#### GSVA with all MSigDB gene sets
+
+##### Select MSigDB all gene sets
+
+```{r gsea}
+
+stopifnot(require(GSVA))
+stopifnot(require(msigdbr)) # for MSigDB database
+
+# Explore msigdb
+msigdbr_species()
+
+msigdbr_collections()
+
+# Retrieve human msigdb
+msigdb_mouse <- msigdbr(species = "mouse")
+msigdb_mouse
+
+# Convert human msigdb into list
+msigdb_mouse_list <- split(x = msigdb_mouse$gene_symbol,
+                           f = msigdb_mouse$gs_name,
+                           )
+head(msigdb_mouse_list)
+
+```
+
+##### Run GSVA with all MSigDB gene sets
+
+```{r run_gsva}
+
+# Run gsva analysis
+gsva_Curie_R26_primTum_msigdb_all <- gsva(expr          = matrix_rld_Curie_R26_primTum,
+                                          gset.idx.list = msigdb_mouse_list
+                                          )
+
+head(gsva_Curie_R26_primTum_msigdb_all)
+dim(gsva_Curie_R26_primTum_msigdb_all)
+
+# Check order
+sample_Curie_R26_primTum_plus$Sample_name == colnames(gsva_Curie_R26_primTum_msigdb_all)
+
+# Melt matrix
+gsva_Curie_R26_primTum_msigdb_all_melt <- melt(gsva_Curie_R26_primTum_msigdb_all)
+colnames(gsva_Curie_R26_primTum_msigdb_all_melt) <- c("geneSet","Sample_name","gsvaScore")
+head(gsva_Curie_R26_primTum_msigdb_all_melt)
+
+# Plot density of GSVA score
+#pdf(paste0(pathToFigures,"density_gsva_msigdb_all_Curie_R26_primTum_RNAseq.pdf"), width=12, height=12)
+ggplot(data = gsva_Curie_R26_primTum_msigdb_all_melt,
+       mapping = aes(x = gsvaScore)
+       ) +
+    geom_density(color="black") +
+    ggtitle(label = "Density distribution of GSVA score")+
+    theme_bw() +
+    theme(text = element_text(size = 30)
+          )
+#dev.off()
+
+# Add sample plan
+gsva_Curie_R26_primTum_msigdb_all_melt_plus <- merge(x = gsva_Curie_R26_primTum_msigdb_all_melt,
+                                                     y = sample_Curie_R26_primTum_plus,
+                                                     by = "Sample_name"
+                                                     )
+head(gsva_Curie_R26_primTum_msigdb_all_melt_plus)
+
+
+msigdb_mouse_list[grep('midbrain',names(msigdb_mouse_list), ignore.case = TRUE)]
+
+# MIDBRAIN 
+gsva_Curie_R26_primTum_msigdb_all_melt_plus_midbrain <- filter(gsva_Curie_R26_primTum_msigdb_all_melt_plus,
+                                                               grepl(".*midbrain.*",
+                                                                     geneSet,
+                                                                     ignore.case = TRUE,
+                                                                     perl = TRUE
+                                                                     )
+                                                               )
+
+# Barplot
+#pdf(paste0(pathToFigures,"barplot_gsva_msigdb_all_Curie_R26_primTum_RNAseq_MIDBRAIN.pdf"), width=16, height=12)
+ggplot(data = gsva_Curie_R26_primTum_msigdb_all_melt_plus_midbrain
+       ) +
+    geom_bar(mapping = aes(x = Patient_ID,
+                           y = gsvaScore,
+                           fill = group_name
+                           ),
+             stat = "identity"
+             ) +
+    facet_wrap(facets = ~ geneSet,
+               ncol = 4
+               ) +
+    xlab(label = "") +
+    scale_fill_manual(values = group_name_col[levels(factor(gsva_Curie_R26_primTum_msigdb_all_melt_plus_midbrain$group_name))],
+                      name="subgroup"
+                      ) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+          #axis.text.x = element_text(size = 8, angle = 45, hjust = 0.8, vjust = 0.6),
+axis.text.x = element_text(size = 10, angle = 90, vjust = 0.5),
+          )
+#dev.off()
+
+# HINDBRAIN 
+gsva_Curie_R26_primTum_msigdb_all_melt_plus_hindbrain <- filter(gsva_Curie_R26_primTum_msigdb_all_melt_plus,
+                                                                grepl(".*hindbrain.*",
+                                                                      geneSet,
+                                                                      ignore.case = TRUE,
+                                                                      perl = TRUE
+                                                                      )
+                                                                )
+
+# Barplot
+#pdf(paste0(pathToFigures,"barplot_gsva_msigdb_all_Curie_R26_primTum_RNAseq_HINDBRAIN.pdf"), width=16, height=10)
+ggplot(data = gsva_Curie_R26_primTum_msigdb_all_melt_plus_hindbrain
+       ) +
+    geom_bar(mapping = aes(x = Patient_ID,
+                           y = gsvaScore,
+                           fill = group_name
+                           ),
+             stat = "identity"
+             ) +
+    facet_wrap(facets = ~ geneSet,
+               ncol = 4
+               ) +
+    xlab(label = "") +
+    scale_fill_manual(values = group_name_col[levels(factor(gsva_Curie_R26_primTum_msigdb_all_melt_plus_hindbrain$group_name))],
+                      name="subgroup"
+                      ) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+          #axis.text.x = element_text(size = 8, angle = 45, hjust = 0.8, vjust = 0.6),
+axis.text.x = element_text(size = 10, angle = 90, vjust = 0.5),
+          )
+#dev.off()
+
+```
+
+##### Unsupervised analysis on GSVA score
+
+```{r unsupervised_analysis_msigdb_all}
+
+# Top annotation
+top_annot_R26_primTum_gsva <- createTopAnnot_func(sampleTable = mutate(sample_Curie_R26_primTum_plus,
+                                                                       subgroup = group_name
+                                                                       ),
+                                                  columns     = "subgroup",
+                                                  colorsList  = list(group_name_col)
+                                                  )
+
+#pdf(paste0(pathToFigures,"complexHeatmap_Curie_R26_primTum_msigdb_all.pdf"), width=16, height=10)
+drawHeatmap_func(matrix               = gsva_Curie_R26_primTum_msigdb_all,
+                 column_title         = "R26 in situ",
+                 row_title            = "MSigDB (all)",
+                 top_annot            = top_annot_R26_primTum_gsva,
+                 row_annot            = NULL,
+                 #bottom_annot         = bottom_annot_Curie_primTum_MYC,
+                 legend_title         = "GSVA\nscore",
+                 show_column_names    = TRUE,
+                 show_row_names       = FALSE,
+                 add_column_dend_axis = FALSE,
+                 columns_dist         = "pearson",
+                 columns_meth         = "ward",
+                 rows_dist            = "euclidean",
+                 rows_meth            = "ward",
+                 fontsize             = 15,
+                 split                = NULL
+                 )
+#dev.off()
+
+# Most variable gene sets
+mvGeneSets <- genes.selection(data       = gsva_Curie_R26_primTum_msigdb_all,
+                              thres.num  = 2000,
+                              probs      = 0.25
+                              )
+
+# Subset matrix
+gsva_Curie_R26_primTum_msigdb_all_mvGeneSets <- gsva_Curie_R26_primTum_msigdb_all[mvGeneSets,]
+head(gsva_Curie_R26_primTum_msigdb_all_mvGeneSets)
+dim(gsva_Curie_R26_primTum_msigdb_all_mvGeneSets)
+
+# Top annotation
+top_annot_R26_primTum_gsva2 <- createTopAnnot_func(sampleTable = mutate(sample_Curie_R26_primTum_plus,
+                                                                        subgroup = group_name,
+                                                                        location = Localization_of_primary_tumor,
+                                                                        sublocation = sub_localization_of_primary_tumor
+                                                                        ),
+                                                   columns     = c("subgroup","location","sublocation"),                                                colorsList  = list(group_name_col,localization_of_primary_tumor_col,sub_localization_of_primary_tumor_col)
+                                                  )
+
+
+#pdf(paste0(pathToFigures,"complexHeatmap_Curie_R26_primTum_msigdb_all_mvGeneSets.pdf"), width=16, height=10)
+drawHeatmap_func(matrix               = gsva_Curie_R26_primTum_msigdb_all_mvGeneSets,
+                 column_title         = "R26 in situ",
+                 row_title            = "MSigDB (all)",
+                 top_annot            = top_annot_R26_primTum_gsva2,
+                 row_annot            = NULL,
+                 legend_title         = "GSVA\nscore",
+                 show_column_names    = TRUE,
+                 show_row_names       = FALSE,
+                 add_column_dend_axis = FALSE,
+                 columns_dist         = "pearson",
+                 columns_meth         = "ward",
+                 rows_dist            = "euclidean",
+                 rows_meth            = "ward",
+                 fontsize             = 15,
+                 split                = NULL
+                 )
+#dev.off()
+
+# Plot UMAP
+#pdf(paste0(pathToFigures,"umap_Curie_R26_primTum_msigdb_all_mvGeneSets_subgroup.pdf"), width=16, height=12)
+umap_func(matrix                     = gsva_Curie_R26_primTum_msigdb_all_mvGeneSets,
+          sampleTable                = sample_Curie_R26_primTum_plus,
+          highlightedVar             = "group_name",
+          highlightedVarName         = "subgroup",
+          colors                     = group_name_col,
+          n_neighbors                = 10,
+          metric                     = "pearson",
+          seed                       = 9,
+          #sampleLabel                = "Patient_ID",
+          sampleLabelColumnCondition = NULL,
+          sampleLabelValueCondition  = NULL,
+          pointsize                   = 10
+          )
+#dev.off()
+
+# Plot UMAP
+#pdf(paste0(pathToFigures,"umap_Curie_R26_primTum_msigdb_all_mvGeneSets_location.pdf"), width=16, height=12)
+umap_func(matrix                     = gsva_Curie_R26_primTum_msigdb_all_mvGeneSets,
+          sampleTable                = sample_Curie_R26_primTum_plus,
+          highlightedVar             = "Localization_of_primary_tumor",
+          highlightedVarName         = "location",
+          colors                     = localization_of_primary_tumor_col,
+          n_neighbors                = 10,
+          metric                     = "pearson",
+          seed                       = 9,
+          #sampleLabel                = "Patient_ID",
+          sampleLabelColumnCondition = NULL,
+          sampleLabelValueCondition  = NULL,
+          pointsize                   = 10
+          )
+#dev.off()
+
+# Plot UMAP
+#pdf(paste0(pathToFigures,"umap_Curie_R26_primTum_msigdb_all_mvGeneSets_subLocation.pdf"), width=16, height=12)
+umap_func(matrix                     = gsva_Curie_R26_primTum_msigdb_all_mvGeneSets,
+          sampleTable                = sample_Curie_R26_primTum_plus,
+          highlightedVar             = "sub_localization_of_primary_tumor",
+          highlightedVarName         = "sub-location",
+          colors                     = sub_localization_of_primary_tumor_col,
+          n_neighbors                = 10,
+          metric                     = "pearson",
+          seed                       = 9,
+          #sampleLabel                = "Patient_ID",
+          sampleLabelColumnCondition = NULL,
+          sampleLabelValueCondition  = NULL,
+          pointsize                   = 10
+          )
+#dev.off()
+
+# Plot UMAP
+#pdf(paste0(pathToFigures,"umap_Curie_R26_primTum_msigdb_all_mvGeneSets_tamoxifen.pdf"), width=16, height=12)
+umap_func(matrix                     = gsva_Curie_R26_primTum_msigdb_all_mvGeneSets,
+          sampleTable                = sample_Curie_R26_primTum_plus,
+          highlightedVar             = "Tamoxifen_date",
+          highlightedVarName         = "tamoxifen",
+          colors                     = tamoxifen_date_col,
+          n_neighbors                = 10,
+          metric                     = "pearson",
+          seed                       = 9,
+          #sampleLabel                = "Patient_ID",
+          sampleLabelColumnCondition = NULL,
+          sampleLabelValueCondition  = NULL,
+          pointsize                   = 10
+          )
+#dev.off()
+
+```
+
+##### Radar plot on gene set of interest (based on most variable gene sets)
+
+###### NEURON related gene sets
+
+```{r neuron_related_geneSets}
+
+head(gsva_Curie_R26_primTum_msigdb_all)
+dim(gsva_Curie_R26_primTum_msigdb_all)
+
+# Subset NEURON related gene sets
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron <- gsva_Curie_R26_primTum_msigdb_all[grep("^GOBP.*NEURON",rownames(gsva_Curie_R26_primTum_msigdb_all)),]
+
+# Most variable gene sets
+mvGeneSets_neuron <- genes.selection(data       = gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron,
+                                     thres.num  = 5,
+                                     probs      = 0.25
+                                     )
+mvGeneSets_neuron
+
+# Subset gene set matrix
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets <- gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron[mvGeneSets_neuron,]
+
+# Convert rownames to column
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets <- rownames_to_column(data.frame(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets, check.names=FALSE),
+                                                                               var = "geneSet"
+                                                                               )
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets
+
+# Check order
+colnames(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets[,-1]) == sample_Curie_R26_primTum_plus$Sample_name
+
+sample_Curie_R26_primTum_plus[,c("Sample_name","group_name")]
+
+# Order sample plan according to group name
+sample_Curie_R26_primTum_plus_ordered <- sample_Curie_R26_primTum_plus[order(sample_Curie_R26_primTum_plus$group_name),c("Sample_name","group_name")]
+
+# Order matrix column name according to group_name 
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets_ordered <- gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets[,c("geneSet",sample_Curie_R26_primTum_plus_ordered$Sample_name)]
+
+# Create sample name vector colors according to group name
+sampleName_vectoColors <- case_when(sample_Curie_R26_primTum_plus_ordered$group_name == 'neuronal' ~ 'black',
+                                    TRUE ~ 'blue'
+                                    )
+names(sampleName_vectoColors) <- sample_Curie_R26_primTum_plus_ordered$Sample_name
+sampleName_vectoColors
+
+saveRDS(object = sampleName_vectoColors,
+        file = "sampleName_vectoColors.RDS"
+        )
+
+library(ggradar)
+
+# Format GO-BP name
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets_ordered$geneSet <- format_GO_labels(x = gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets_ordered$geneSet,
+                                                                                             prefix = "GOBP",
+                                                                                             wordsLength = 4
+                                                                                             )
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_neuron_mvGeneSets.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets_ordered,
+            grid.min                  = min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets[,-1], .funs = min)),
+            grid.max                  = max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets[,-1], .funs = max)),
+            grid.mid                  = mean(max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets[,-1], .funs = max)) + min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_mvGeneSets[,-1], .funs = min))),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            background.circle.colour  = 'white',
+            legend.key.height = 6
+            )
+#dev.off()
+
+# Compute average GSVA score of all GO-BP neuron related gene sets
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means <- data.frame(means = colMeans(x = gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron)                                                          )
+
+# Convert rownames to column
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means <- rownames_to_column(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means,
+                                                                          var = "Sample_name"
+                                                                          )
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means
+
+# Spread table
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means <- spread(data = gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means, key = "Sample_name",value = "means")
+
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means
+
+# Order matrix column name according to group_name 
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered <- gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means[,sample_Curie_R26_primTum_plus_ordered$Sample_name]
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered
+
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered <- rownames_to_column(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered,
+                                                                                  var = "averageGeneSet"
+                                                                                  )
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_neuron_meanGeneSet.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered,
+            grid.min                  = min(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered[-1]),
+            grid.max                  = max(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered[-1]),
+            grid.mid                  = mean(max(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered[-1]) + min(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered[-1])),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            background.circle.colour  = 'white',
+            group.colours             = 'black'
+            )
+#dev.off()
+
+```
+
+###### IMMUNE related gene sets
+
+```{r neuron_related_geneSets}
+
+# Subset immune related gene sets
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune <- gsva_Curie_R26_primTum_msigdb_all[grep("^GOBP.*IMMUNE",rownames(gsva_Curie_R26_primTum_msigdb_all)),]
+
+# Most variable gene sets
+mvGeneSets_immune <- genes.selection(data       = gsva_Curie_R26_primTum_msigdb_all_GOBP_immune,
+                                     thres.num  = 5,
+                                     probs      = 0.25
+                                     )
+mvGeneSets_immune
+
+# Subset gene set matrix
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets <- gsva_Curie_R26_primTum_msigdb_all_GOBP_immune[mvGeneSets_immune,]
+
+# Convert rownames to column
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets <- rownames_to_column(data.frame(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets, check.names=FALSE),
+                                                                               var = "geneSet"
+                                                                               )
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets
+
+# Check order
+colnames(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets[,-1]) == sample_Curie_R26_primTum_plus$Sample_name
+
+# Order matrix column name according to group_name 
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets_ordered <- gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets[,c("geneSet",sample_Curie_R26_primTum_plus_ordered$Sample_name)]
+
+# Format GO-BP name
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets_ordered$geneSet <- format_GO_labels(x = gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets_ordered$geneSet,
+                                                                                             prefix = "GOBP",
+                                                                                             wordsLength = 4
+                                                                                             )
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_immune_mvGeneSets.pdf"), width=16, height=12)
+ggradar_mod(plot.data          = gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets_ordered,
+            grid.min           = min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets[,-1], .funs = min)),
+            grid.max           = max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets[,-1], .funs = max)),
+            grid.mid           = mean(max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets[,-1], .funs = max)) + min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_mvGeneSets[,-1], .funs = min))),
+            axis.label.colour  = sampleName_vectoColors,
+            fill               = TRUE,
+            fill.alpha         = 0.1,
+            background.circle.colour        = 'white',
+            legend.position = "left",
+            legend.key.height = 6
+            )
+#dev.off()
+
+# Compute average GSVA score of all GO-BP immune related gene sets
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means <- data.frame(means = colMeans(x = gsva_Curie_R26_primTum_msigdb_all_GOBP_immune)                                                          )
+
+# Convert rownames to column
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means <- rownames_to_column(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means,
+                                                                          var = "Sample_name"
+                                                                          )
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means
+
+# Spread table
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means <- spread(data = gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means, key = "Sample_name",value = "means")
+
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means
+
+# Order matrix column name according to group_name 
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered <- gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means[,sample_Curie_R26_primTum_plus_ordered$Sample_name]
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered
+
+gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered <- rownames_to_column(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered,
+                                                                                  var = "averageGeneSet"
+                                                                                  )
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_immune_meanGeneSet.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered,
+            grid.min                  = min(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered[-1]),
+            grid.max                  = max(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered[-1]),
+            grid.mid                  = mean(max(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered[-1]) + min(gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered[-1])),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            group.colours             = 'blue',
+            background.circle.colour  = 'white'
+            )
+#dev.off()
+
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered <- rbind(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_means_ordered,
+                                                                            gsva_Curie_R26_primTum_msigdb_all_GOBP_immune_means_ordered
+                                                                            )
+
+gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered$averageGeneSet <- c("GO-BP neuron related gene sets","GO-BP immune related gene sets")
+
+# Save RDS (for paper figure in murineRT_integration_affy_RNAseq.Rmd script)
+saveRDS(object = gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered,
+        file = "gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered.RDS"
+        )
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_neuron_immune_meanGeneSet.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered,
+            grid.min           = min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered[,-1], .funs = min)),
+            grid.max           = max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered[,-1], .funs = max)),
+            grid.mid           = mean(max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered[,-1], .funs = max)) + min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_GOBP_neuron_immune_means_ordered[,-1], .funs = min))),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            group.colours             = c('blue','brown'),
+            background.circle.colour  = 'white'
+            )
+#dev.off()
+
+```
+
+##### Differential expression analysis ate pathway level
+
+```{r differential_expression_analysis}
+
+library(limma)
+
+# Create mode matrix
+model <- model.matrix(~factor(sample_Curie_R26_primTum_plus$group_name))
+colnames(model) <- c("neuronal","non_neuronal")
+
+# Fit model
+fit <- lmFit(object = gsva_Curie_R26_primTum_msigdb_all,
+             design = model
+             )
+fit <- eBayes(fit = fit)
+
+# Extract table result
+gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal <- topTable(fit, coef = 2, number = Inf)
+head(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal)
+
+# Plot volcano plot
+ggplot() +
+    geom_point(data = gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal,
+               mapping = aes(x = logFC,
+                             y = -log10(adj.P.Val)
+                             ),
+               color = "grey"
+               ) +
+    geom_point(data = filter(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal,
+                             abs(logFC) > 0.5,
+                             adj.P.Val < 0.01
+                            ),
+               mapping = aes(x = logFC,
+                             y = -log10(adj.P.Val)
+                             ),
+               color = "black"
+               ) +
+    geom_point(data = filter(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal[grep("^GOBP.*NEURON",rownames(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal)),],
+                             abs(logFC) > 0.5,
+                             adj.P.Val < 0.01,
+                             ),
+               mapping = aes(x = logFC,
+                             y = -log10(adj.P.Val)
+                             ),
+               color = "blue",
+               size = 4
+               ) +
+    geom_point(data = filter(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal[grep("^GOBP.*IMMUNE",rownames(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal)),],
+                             abs(logFC) > 0.5,
+                             adj.P.Val < 0.01,
+                             ),
+               mapping = aes(x = logFC,
+                             y = -log10(adj.P.Val)
+                             ),
+               color = "red",
+               size = 4
+               ) +
+    theme_bw()
+
+```
+
+##### Radar plot on gene set of interest (based on differential expression results)
+
+###### NEURON related gene sets
+
+```{r neuron_related_geneSets}
+
+head(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal)
+dim(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal)
+
+# NEURON related gene sets
+gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal_GOBPneuronGeneSets <- rownames(filter(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal[grep("^GOBP.*NEURON",rownames(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal)),],
+                             abs(logFC) > 0.5,
+                             adj.P.Val < 0.01,
+                )
+         )
+
+# Subset gene set matrix
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets <- gsva_Curie_R26_primTum_msigdb_all[gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal_GOBPneuronGeneSets,]
+
+# Convert rownames to column
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets <- rownames_to_column(data.frame(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets, check.names=FALSE),
+                                                                               var = "geneSet"
+                                                                               )
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets
+
+# Check order
+colnames(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets[,-1]) == sample_Curie_R26_primTum_plus$Sample_name
+
+# Order sample plan according to group name
+sample_Curie_R26_primTum_plus_ordered <- sample_Curie_R26_primTum_plus[order(sample_Curie_R26_primTum_plus$group_name),c("Sample_name","group_name")]
+
+# Save RDS (for paper figure in murineRT_integration_affy_RNAseq.Rmd script)
+saveRDS(object = sample_Curie_R26_primTum_plus_ordered,
+        file = "sample_Curie_R26_primTum_plus_ordered.RDS"
+        )
+
+
+# Order matrix column name according to group_name 
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_ordered <- gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets[,c("geneSet",sample_Curie_R26_primTum_plus_ordered$Sample_name)]
+
+library(ggradar)
+
+# Format GO-BP name
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_ordered$geneSet <- format_GO_labels(x = gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_ordered$geneSet,
+                                                                                        prefix = "GOBP",
+                                                                                        wordsLength = 4
+                                                                                        )
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_neuron_DEGeneSets.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_ordered,
+            grid.min                  = min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_ordered[,-1], .funs = min)),
+            grid.max                  = max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_ordered[,-1], .funs = max)),
+            grid.mid                  = mean(max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_ordered[,-1], .funs = max)) + min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_ordered[,-1], .funs = min))),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            background.circle.colour  = 'white',
+            legend.key.height = 6
+            )
+#dev.off()
+
+# Compute average GSVA score of all GO-BP neuron related gene sets
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means <- data.frame(means = colMeans(x = gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets[,-1])                                                          )
+
+# Convert rownames to column
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means <- rownames_to_column(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means,
+                                                                                var = "Sample_name"
+                                                                          )
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means
+
+# Spread table
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means <- spread(data = gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means, key = "Sample_name",value = "means")
+
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means
+
+# Order matrix column name according to group_name 
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered <- gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means[,sample_Curie_R26_primTum_plus_ordered$Sample_name]
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered
+
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered <- rownames_to_column(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered,
+                                                                                  var = "averageGeneSet"
+                                                                                  )
+
+gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_neuron_meanDEGeneSet.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered,
+            grid.min                  = min(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered[-1]),
+            grid.max                  = max(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered[-1]),
+            grid.mid                  = mean(max(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered[-1]) + min(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered[-1])),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            background.circle.colour  = 'white',
+            group.colours             = 'black'
+            )
+#dev.off()
+
+```
+
+###### IMMUNE related gene sets
+
+```{r immune_related_geneSets}
+
+# IMMUNE related gene sets
+gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal_GOBPimmuneGeneSets <- rownames(filter(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal[grep("^GOBP.*IMMUNE",rownames(gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal)),],
+                             abs(logFC) > 0.5,
+                             adj.P.Val < 0.01,
+                )
+         )
+
+# Subset gene set matrix
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets <- gsva_Curie_R26_primTum_msigdb_all[gsva_Curie_R26_primTum_msigdb_all_neuronal_vs_nonNeuronal_GOBPimmuneGeneSets,]
+
+# Convert rownames to column
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets <- rownames_to_column(data.frame(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets, check.names=FALSE),
+                                                                               var = "geneSet"
+                                                                               )
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets
+
+# Check order
+colnames(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets[,-1]) == sample_Curie_R26_primTum_plus$Sample_name
+
+# Order sample plan according to group name
+sample_Curie_R26_primTum_plus_ordered <- sample_Curie_R26_primTum_plus[order(sample_Curie_R26_primTum_plus$group_name),c("Sample_name","group_name")]
+
+# Order matrix column name according to group_name 
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_ordered <- gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets[,c("geneSet",sample_Curie_R26_primTum_plus_ordered$Sample_name)]
+
+library(ggradar)
+
+# Format GO-BP name
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_ordered$geneSet <- format_GO_labels(x = gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_ordered$geneSet,
+                                                                                        prefix = "GOBP",
+                                                                                        wordsLength = 4
+                                                                                        )
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_immune_DEGeneSets.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_ordered,
+            grid.min                  = min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_ordered[,-1], .funs = min)),
+            grid.max                  = max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_ordered[,-1], .funs = max)),
+            grid.mid                  = mean(max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_ordered[,-1], .funs = max)) + min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_ordered[,-1], .funs = min))),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            background.circle.colour  = 'white',
+            legend.key.height = 6
+            ) +
+    theme(legend.position = "none")
+#dev.off()
+
+# Compute average GSVA score of all GO-BP neuron related gene sets
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means <- data.frame(means = colMeans(x = gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets[,-1])                                                          )
+
+# Convert rownames to column
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means <- rownames_to_column(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means,
+                                                                                var = "Sample_name"
+                                                                          )
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means
+
+# Spread table
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means <- spread(data = gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means, key = "Sample_name",value = "means")
+
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means
+
+# Order matrix column name according to group_name 
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered <- gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means[,sample_Curie_R26_primTum_plus_ordered$Sample_name]
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered
+
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered <- rownames_to_column(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered,
+                                                                                  var = "averageGeneSet"
+                                                                                  )
+
+gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_immune_meanDEGeneSet.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered,
+            grid.min                  = min(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered[-1]),
+            grid.max                  = max(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered[-1]),
+            grid.mid                  = mean(max(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered[-1]) + min(gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered[-1])),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            background.circle.colour  = 'white',
+            group.colours             = 'blue'
+            )
+#dev.off()
+
+```
+
+###### NEURON and IMMUNE related gene sets
+
+```{r combine_neuron_immune_DEGeneSets}
+
+gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered <- rbind(gsva_Curie_R26_primTum_msigdb_all_neuron_DEGeneSets_means_ordered,
+                                                                            gsva_Curie_R26_primTum_msigdb_all_immune_DEGeneSets_means_ordered
+                                                                            )
+
+gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered$averageGeneSet <- c("GO-BP neuron related gene sets","GO-BP immune related gene sets")
+
+# Save RDS (for paper figure in murineRT_integration_affy_RNAseq.Rmd script)
+saveRDS(object = gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered,
+        file = "gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered.RDS"
+        )
+
+# Plot radar plot
+#pdf(paste0(pathToFigures,"radarPlot_Curie_R26_primTum_msigdb_all_GO_neuron_immune_DEGeneSet.pdf"), width=16, height=12)
+ggradar_mod(plot.data                 = gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered,
+            grid.min           = min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered[,-1], .funs = min)),
+            grid.max           = max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered[,-1], .funs = max)),
+            grid.mid           = mean(max(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered[,-1], .funs = max)) + min(summarize_all(gsva_Curie_R26_primTum_msigdb_all_neuron_immune_DEGeneSets_means_ordered[,-1], .funs = min))),
+            axis.label.colour         = sampleName_vectoColors,
+            fill                      = TRUE,
+            fill.alpha                = 0.1,
+            group.colours             = c('blue','brown'),
+            background.circle.colour  = 'white'
+            )
+#dev.off()
+
+```
+
+
+
+## Expression of genes of interest
+
+### Compute TPM
+
+```{r computeTPM}
+
+head(rawCounts_Curie_R26_primTum)
+
+# Compute TPM
+TPM_Curie_R26_primTum <- computeTPM(rawCount_matrix  = rawCounts_Curie_R26_primTum,
+                                    gtfAnnotation    = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/all/data/UCSC_mm10_refFlat.gtf",
+                                    geneName_column  = 0
+                                    )
+
+head(TPM_Curie_R26_primTum)
+dim(TPM_Curie_R26_primTum)
+
+# Melt TPM table
+TPM_Curie_R26_primTum_melt <- melt(TPM_Curie_R26_primTum)
+colnames(TPM_Curie_R26_primTum_melt) <- c("symbol","Sample_name","TPM")
+head(TPM_Curie_R26_primTum_melt)
+
+# Merge subgroup
+TPM_Curie_R26_primTum_melt_plus <- merge(x = TPM_Curie_R26_primTum_melt,
+                                         y = sample_Curie_R26_primTum_plus[,c("Sample_name","group_name")],
+                                         by = "Sample_name",
+                                         all = TRUE
+                                         )
+
+head(TPM_Curie_R26_primTum_melt_plus)
+
+library(ggplot2)
+
+library(dplyr)
+
+ggplot(data = filter(.data = TPM_Curie_R26_primTum_melt_plus,
+                     symbol %in% c("En1","En2","Irx1","Irx2","Wnt3a","Fgf8")
+                     )
+       ) +
+    facet_wrap(~symbol) +
+    geom_boxplot(mapping = aes(x = group_name, y = log2(TPM + 1))
+                 )
+
+# Export TPM table (for paper figure built inside the scRNAseq script)
+write.table(x          = TPM_Curie_R26_primTum_melt_plus,
+            file       = "murine_RT_R26_primaryTum_melt_plus.txt",
+            sep        = "\t",
+            row.names  = FALSE
+            )
+
+# Export raw counts for figshare (for Lobon-Iglesias et al., 2022)
+write.table(x          = rownames_to_column(.data = data.frame(TPM_Curie_R26_primTum, check.names = FALSE),"symbol"),
+            file       = "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/GEO_data_submission_LobonIglesias2023/bulkRNAseq_mouseRT_R26/matrix_mouse_R26_primaryRT_RNAseq_TPM.txt",
+            sep        = "\t",
+            row.names  = FALSE,
+            quote      = FALSE
+            )
+
+```
+
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

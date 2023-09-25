@@ -1,0 +1,1470 @@
+---
+title: "Murine RT scRNAseq"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "murine_RT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+#pathToRNApip_RESULT          <- paste0(pathToThisProject,"RNApip_RESULT/")
+#pathToFeatureCounts          <- paste0(pathToThisProject,"FeatureCounts_RESULT/")
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("murine_RT_scRNAseq_R26P72.RData")
+
+#save.image(file="murine_RT_scRNAseq_R26P72.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("../plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+
+```
+
+```{r delete_all_objects}
+
+# Delete all objects
+#rm(list = ls())
+
+```
+
+# R26P72 scRNA-seq
+
+## Load data and create Seurat object
+
+```{r load_data}
+
+pathTo_R26P72_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/murine_RT/data/count_Rosa26-P72/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+R26P72_data <- Read10X(data.dir         = pathTo_R26P72_cellRangerCount,
+                        gene.column      = 2,
+                        unique.features  = TRUE
+                        )
+
+```
+
+## Create Seurat object
+
+```{r load_data}
+
+# Create Seurat object
+scRNAseq_Seurat_R26P72 <- CreateSeuratObject(counts   = R26P72_data,
+                                             project  = "R26P72"
+                                             )
+
+# Save Seurat object as RDS file
+saveRDS(object = scRNAseq_Seurat_R26P72,
+        file = paste0(pathToReport,"scRNAseq_Seurat_R26P72_raw.RDS")
+        )
+
+# Copy file to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"scRNAseq_Seurat_R26P72_raw.RDS"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+## Cell QC and filtering
+
+```{r create_table_of_nbOfCell_after_filtering}
+
+# Create data frame
+cellFiltering <- data.frame(filtering = "no filtering",
+                            nbOfCells = nrow(scRNAseq_Seurat_R26P72@meta.data)
+                            )
+
+cellFiltering
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P72_cellFiltering.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering,
+       mapping = aes(x = filtering,
+                     y = nbOfCells
+                     ),
+             ) +
+    geom_bar(stat = "identity",
+             fill = "black"
+             ) +
+    ylim(0,25000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Compute percent of reads map on mitochondrial and ribosomal proteins
+
+```{r mito_ribo_reads_fraction}
+
+# Ribosomal protein reads fraction
+scRNAseq_Seurat_R26P72[["percent.riboProt"]] <- PercentageFeatureSet(object  = scRNAseq_Seurat_R26P72,
+                                                                     pattern = "^Rp[ls].*",
+                                                                     assay   = "RNA"
+                                                                     )
+head(scRNAseq_Seurat_R26P72@meta.data)
+
+# Mitocondrial genes percentage
+scRNAseq_Seurat_R26P72[["percent.mito"]] <- PercentageFeatureSet(object   = scRNAseq_Seurat_R26P72,
+                                        #features = as.vector(as.character(mitoGenes$`Approved symbol`)),
+                                                                 pattern = "^mt-",
+                                                                 assay = "RNA"
+                                                                 )
+head(scRNAseq_Seurat_R26P72@meta.data)
+
+```
+
+### Number of genes and number of RNA (UMIs)
+
+```{r number_of_genes_per_cell}
+
+head(scRNAseq_Seurat_R26P72@meta.data)
+
+# Set minimum number of genes
+min_nFeature <- round(quantile(scRNAseq_Seurat_R26P72@meta.data$nFeature_RNA,
+                               probs = 0.05
+                               ))
+min_nFeature
+
+# Density distribution of total RNA count
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_R26P72_nbRNA.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P72@meta.data) +
+    geom_histogram(mapping = aes(x = log(nCount_RNA)),
+                   fill = "yellow",
+                   color = "black"#,
+                   #binwidth = 1000
+                   ) +
+    xlab(label = "\nnb of RNA (UMI)") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Density distribution of detected genes
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_R26P72_nbGenes.pdf"), width = 12, height = 12)
+ggplot() +
+    geom_histogram(data = filter(scRNAseq_Seurat_R26P72@meta.data, nFeature_RNA >= 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "blue",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    geom_histogram(data = filter(scRNAseq_Seurat_R26P72@meta.data, nFeature_RNA < 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "grey",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    xlab(label = "\nnb of genes") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Scatter plot nCount_RNA and nFeature_RNA
+p <- ggplot() +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P72@meta.data,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "darkgreen"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P72@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    xlab(label = "\nRNA count (UMI)") +
+    ylab(label = "nb of genes\n") +
+    theme_bw() +
+    geom_hline(yintercept = min_nFeature,
+               color = "red",
+               lty = 2
+               ) +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold")
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_R26P72@meta.data$nCount_RNA) - min(scRNAseq_Seurat_R26P72@meta.data$nCount_RNA))/2,
+                            y = min_nFeature
+                            ),
+              label = min_nFeature,
+              color = "red",
+              size = 15,
+              nudge_y = max(scRNAseq_Seurat_R26P72@meta.data$nFeature_RNA)/20
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_R26P72_nbRNA_vs_nbGene.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "yellow"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Add UMIs/gene to meta.data
+nCount_per_Feature <- scRNAseq_Seurat_R26P72@meta.data$nCount_RNA/scRNAseq_Seurat_R26P72@meta.data$nFeature_RNA
+
+scRNAseq_Seurat_R26P72 <- AddMetaData(object    = scRNAseq_Seurat_R26P72,
+                                      metadata  = nCount_per_Feature,
+                                      col.name  = "nCount_per_Feature"
+                                      )
+
+head(scRNAseq_Seurat_R26P72@meta.data)
+
+# Density distribution of the number of UMIs per gene
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_R26P72_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P72@meta.data) +
+    geom_histogram(mapping = aes(x = nCount_per_Feature,
+                                 y = ..density..
+                                 ),
+                   color = "darkgreen",
+                   fill = "white"
+                   ) +
+        geom_density(mapping = aes(x = nCount_per_Feature),
+                     color = "red",
+                     size = 2
+                 ) +
+    xlab(label = "\nUMIs/gene") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Number of gene filtering
+scRNAseq_Seurat_R26P72_nbGenes <- subset(x       = scRNAseq_Seurat_R26P72,
+                                         subset  = nFeature_RNA > min_nFeature
+                                         )
+
+# Append cell filtering table
+cellFiltering_nbGenes <- rbind(cellFiltering,
+                               data.frame(filtering = "nb genes",
+                                          nbOfCells = nrow(scRNAseq_Seurat_R26P72_nbGenes@meta.data)
+                                          )
+                               )
+
+cellFiltering_nbGenes
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P72_cellFiltering_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering_nbGenes,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,30000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_x_discrete(limits = c("no filtering", "nb genes")) +
+    scale_fill_manual(values = c("darkgreen","black")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Mitochondrial genes
+
+```{r QC_filtering}
+
+# Set percentage of count falling in mitochondrial genes
+max_percOfMitoGenes <- 10
+# Scatter plot
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_R26P72_nbGenes@meta.data,
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P72_nbGenes@meta.data,
+                             percent.mito < max_percOfMitoGenes
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "blue"
+               ) +
+    xlab(label = "\nnb of RNA (UMI count)") +
+ylab(label = "\n% mito. genes\n") +
+geom_hline(yintercept = max_percOfMitoGenes,
+           color = "red",
+           lty = 2
+           ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_R26P72@meta.data$nCount_RNA) - min(scRNAseq_Seurat_R26P72@meta.data$nCount_RNA))/2,
+                            y = max_percOfMitoGenes
+                            ),
+              label = paste0(max_percOfMitoGenes," %"),
+              color = "red",
+              size = 15,
+              nudge_y = 2
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_R26P72_nbRNA_vs_percMito.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "y",
+           fill     = "violet"
+           )
+#dev.off()
+
+# Number of feature detected for each cell
+#max_nFeature <- mean(scRNAseq_Seurat_R26P72@meta.data$nFeature_RNA) + 2*sd(scRNAseq_Seurat_R26P72@meta.data$nFeature_RNA)
+
+# Mitochondrial gene filtering
+scRNAseq_Seurat_R26P72_nbGenes_percMito <- subset(x = scRNAseq_Seurat_R26P72_nbGenes,
+                                                  subset = percent.mito < max_percOfMitoGenes
+                                )
+
+# Append cell filtering table
+cellFiltering_nbGenes_percMito <- rbind(cellFiltering_nbGenes,
+                                        data.frame(filtering = "perc. mito.",
+                                                   nbOfCells = nrow(scRNAseq_Seurat_R26P72_nbGenes_percMito@meta.data)
+                                                   )
+                                        )
+
+cellFiltering_nbGenes_percMito
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P72_cellFiltering_nbGenes_percMito.pdf"), width = 12, height = 8)
+ggplot(data = cellFiltering_nbGenes_percMito,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,25000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_x_discrete(limits = c("no filtering","nb genes","perc. mito.")) +
+    scale_fill_manual(values = c("darkgreen","black", "green")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Fraction of reads map to ribosomal proteins
+
+```{r QC_filtering}
+
+# Scatter plot nb of genes and fraction of reads map to ribosomal proteins
+p <- ggplot() +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P72@meta.data,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "darkgreen"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P72@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = nFeature_RNA
+                             ),
+               pch = 21,
+               color = "grey",
+               fill = "yellow"
+               ) +
+    xlab(label = "\n% ribo prot reads") +
+    ylab(label = "nb of genes\n") +
+    theme_bw() +
+    geom_hline(yintercept = min_nFeature,
+               color = "red",
+               lty = 2
+               ) +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold")
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_R26P72@meta.data$percent.riboProt) - min(scRNAseq_Seurat_R26P72@meta.data$percent.riboProt))/2,
+                            y = min_nFeature
+                            ),
+              label = min_nFeature,
+              color = "red",
+              size = 15,
+              nudge_y = max(scRNAseq_Seurat_R26P72@meta.data$nFeature_RNA)/20
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_R26P72_percRiboProt_vs_nbGene.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "green"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Scatter plot nb of genes and fraction of reads map to ribosomal proteins
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_R26P72@meta.data,
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P72@meta.data,
+                             percent.mito < max_percOfMitoGenes,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "blue"
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_R26P72@meta.data,
+                             nFeature_RNA < min_nFeature
+                             ),
+               mapping = aes(x = percent.riboProt,
+                             y = percent.mito
+                             ),
+               pch = 21,
+               color = "grey",
+               fill = "yellow"
+               ) +
+    xlab(label = "\n% ribo prot reads") +
+ylab(label = "\n% mito. genes\n") +
+geom_hline(yintercept = max_percOfMitoGenes,
+           color = "red",
+           lty = 2
+           ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          ) +
+    geom_text(mapping = aes(x = (max(scRNAseq_Seurat_R26P72@meta.data$percent.riboProt) - min(scRNAseq_Seurat_R26P72@meta.data$percent.riboProt))/2,
+                            y = max_percOfMitoGenes
+                            ),
+              label = paste0(max_percOfMitoGenes," %"),
+              color = "red",
+              size = 15,
+              nudge_y = 2
+              )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_R26P72_percRiboProt_vs_percMito.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "green"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Check if distribution is multimodal (assuming that the data are drawn from more normals)
+library(mclust)
+gmm <- Mclust(scRNAseq_Seurat_R26P72@meta.data$percent.riboProt)
+summary(gmm)
+
+```
+
+## Data normalization
+
+```{r data_normalization}
+
+# Normalization
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm <- NormalizeData(object                = scRNAseq_Seurat_R26P72_nbGenes_percMito,
+                                                               normalization.method  = "LogNormalize",
+                                                               scale.factor          = 10000
+                                                               )
+
+```
+
+# Assign cell-cycle scores
+
+```{r assign_cellCycle_scores}
+
+# Cell cycle gene markers (present in Seurat)
+str(cc.genes)
+length(cc.genes$s.genes)
+length(cc.genes$g2m.genes)
+
+cc.genes$g2m.genes
+cc.genes$s.genes
+
+# Function to convert human to mouse genes (from https://www.r-bloggers.com/2016/10/converting-mouse-to-human-gene-names-with-biomart-package/)
+convertHumanToMouse <- function(humanGenes)
+{
+    # Load biomaRt package
+    require("biomaRt")
+
+    # Create human and mouse mart objects
+    human <- useMart("ensembl", dataset = "hsapiens_gene_ensembl", host = "dec2021.archive.ensembl.org")
+    mouse <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "dec2021.archive.ensembl.org")
+
+    # Create human/mouse gene conversion table
+    humanMouseGenes <- getLDS(attributes   = c("hgnc_symbol"),
+                              filters      = "hgnc_symbol",
+                              values        = humanGenes,
+                              mart         = human,
+                              attributesL  = c("mgi_symbol"),
+                              martL        = mouse,
+                              uniqueRows   = TRUE
+                              )
+
+    # Select mouse gene column
+    mouseGenes <- unique(humanMouseGenes[,2])
+
+    return(mouseGenes)
+    
+}
+
+mouse.g2m.genes <- convertHumanToMouse(cc.genes$g2m.genes)
+mouse.g2m.genes
+
+mouse.s.genes <- convertHumanToMouse(cc.genes$s.genes)
+mouse.s.genes
+
+# Compute cell cycle scoring  
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm <- CellCycleScoring(object        = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm,
+                                                                  s.features    = mouse.s.genes,
+                                                                  g2m.features  = mouse.g2m.genes
+                                                                  )
+
+# Check meta data
+colnames(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm@meta.data)
+head(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm@meta.data)
+
+# Plot covariate distribution
+plot(density(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm@meta.data$S.Score))
+
+plot(density(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm@meta.data$G2M.Score))
+
+```
+
+
+# Pre-analysis
+
+This part of analysis aims to (1) find the minimun number of PCs and (2) look at the effect of covariates on clustering.
+
+
+## Find min number of PCs
+
+```{r feature_selection}
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA <- FindVariableFeatures(object            = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm,
+                                                                         selection.method  = variableFeatures_method,
+                                                                         nfeatures         = nFeatures
+                                                                         )
+
+# Mean-variance scatter plot
+#pdf(file = paste0(pathToFigures,"variableFeaturePlot_scRNAseq_R26P72_PCA.pdf"), width = 12, height = 8)
+VariableFeaturePlot(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA)
+#dev.off()
+
+nrow(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA@assays$RNA)
+
+# Data scaling 
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA <- ScaleData(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA,
+                                                              features = rownames(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA)
+                                                              )
+
+# PCA
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA <- RunPCA(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA)
+
+# PCs elbow plot
+PCmin <- 14
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_R26P72_PCA.pdf"), width = 12, height = 12)
+ElbowPlot(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA,
+          ndims = 50
+          ) +
+    geom_vline(xintercept = PCmin, lty = 2, color = "blue") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Heatmap of each PC
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_R26P72_PCA.pdf"), width = 15, height = 9)
+DimHeatmap(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA,
+           dims = 1:15,
+           ncol = 5
+           )
+#dev.off()
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P72_PCA.pdf"), width = 12, height = 12)
+DimPlot(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA,
+        reduction = "pca"
+        ) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+## Plot PCA and covariates
+
+```{r PCA_and_covariates}
+
+# Extract matrix
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA,
+                                                                               slot = "scale.data"                                              )                                                                 )
+
+head(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix[,1:3])
+
+# Plot density of scaled data
+#scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix_melt <- melt(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix)
+#head(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix_melt)
+#colnames(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix_melt) <- c("gene","cell","scaledExprs")
+#plot(density(exp(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix)))
+
+# Get HVF
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_mvGenes <- HVFInfo(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA,
+                                                               selection.method = "vst"
+                                                               )
+
+head(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_mvGenes)
+nrow(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_mvGenes)
+
+# Get most variable genes
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_mvGenes[order(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_mvGenes$variance.standardized, decreasing = TRUE),] %>% .[1:nFeatures,] -> mvGenes
+
+# Subset matrix
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix_mvGenes <- scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix[as.vector(rownames(mvGenes)),]
+
+nrow(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix_mvGenes)
+
+# PCA analysis
+PC        <- prcomp(data.frame(t(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_matrix_mvGenes)))
+eigVal    <- get_eigenvalue(PC)
+eigValPer <- round(eigVal$variance.percent, digits = 2)
+
+pci       <- data.frame(PC$x,scRNAseq_Seurat_R26P72_nbGenes_percMito_norm@meta.data)
+
+# Plot eigen value
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P72_PCA_eigValPer.pdf"), width = 10, height = 10)
+ggplot() +
+    geom_bar(data = data.frame(PC = 1:50, eigValPer = eigValPer[1:50]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity"
+             ) +
+    geom_bar(data = data.frame(PC = 1:PCmin, eigValPer = eigValPer[1:PCmin]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity",
+             fill = "blue"
+             ) +
+    xlab(label = "\nPC") +
+    ylab(label = "% variability (eigen value)\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Plot PCA and nb of UMIs
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P72_PCA_nbUMIs.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = log10(nCount_RNA)),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "log10(#UMIs)",
+                            type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+         )
+#dev.off()
+
+# Plot PCA and nb of genes
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P72_PCA_nbGenes.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nFeature_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "# genes",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb RNA per gene
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P72_PCA_nbRNA_per_gene.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(colour = nCount_per_Feature),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "UMIs/gene",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P72_PCA_percMito.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = percent.mito),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "% mito",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and cell cycle phase
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_R26P72_PCA_cellCyclePhase.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = Phase),
+               size    = 1#,
+               #pch     = 21
+               ) +
+    #scale_fill_continuous(type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+# Clustering (Using PCmin as identified above)
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust <- FindNeighbors(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA,
+                                                                        dims = 1:PCmin
+                                                                        )
+
+clustering_resolutions <- seq(from = 0, to = 2, by = 0.1)
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust <- FindClusters(object     = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+                                                                       resolution = clustering_resolutions
+                                                                       )      
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_R26P72.RDS"
+                        )
+        )
+
+# Save as loom object
+#as.loom(x         = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+ #       filename  = "cellOrigin_ATRT_scRNAseq_R26P72.loom"
+  #      )
+    
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_R26P72.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data,
+         prefix          = "RNA_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE,
+         color           = "red"
+         )
+#dev.off()
+
+choosenResolution <- 0.2
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution <- FindClusters(object     = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+                                                                                         resolution = choosenResolution
+                                                                                         )      
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_R26P72_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution@meta.data
+       ) +
+    stat_count(mapping = aes(x     = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                             fill  = Phase
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              fontface     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+# Export meta data (for SCENIC analysis)
+head(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data)
+
+write.table(x      = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data,
+            file   = "scRNAseq_Seurat_R26P72_PCmin_metaData.txt",
+            sep    = ",",
+            quote  = FALSE
+            )
+
+```
+
+## UMAP
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust <- RunUMAP(object       = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+                                                                  dims         = 1:PCmin,
+                                                                  n.neighbors  = 30
+                                                                  )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P72_clust.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("RNA_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 15
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+# Add UMIs/gene to meta.data
+log10_nCount_RNA <- log10(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data$nCount_RNA)
+
+# Add UMIs/gene to meta.data
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust <- AddMetaData(object    = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+                                                                      metadata  = log10_nCount_RNA,
+                                                                      col.name  = "log10_nCount_RNA"
+                                                                      )
+
+colnames(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data)
+
+
+# UMAP and nb of UMIs
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P72_clust_nbUMIs.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+            features = "log10_nCount_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.1),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P72_clust_nbGenes.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+            features = "nFeature_RNA",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.1),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P72_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+            features = "nCount_per_Feature",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.1),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P72_clust_percMito.pdf"), width = 12, height = 12)
+FeaturePlot(object = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+            features = "percent.mito",
+            reduction = "umap"
+            ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.1),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# UMAP and cell cycle phase
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P72_clust_cellCyclePhase.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = FALSE,
+        label.size  = 15
+        ) +
+    ggtitle(label = NULL) +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.1),
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Boxplot of covariates per cluster
+
+```{r boxplot_and_covariates}
+
+# Boxplot and nb of UMIs
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P72_clust_nbUMIs.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = log10(nCount_RNA),
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = log10(nCount_RNA)
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "log10(UMI count)\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P72_clust_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nFeature_RNA,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nFeature_RNA
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "# genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and nb of UMIs per gene
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P72_clust_nbRNA_per_gene.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = nCount_per_Feature,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = nCount_per_Feature
+                              ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "UMIs per gene\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+# Boxplot and percentage of mitochondrial genes
+#pdf(file = paste0(pathToFigures,"boxplot_scRNAseq_R26P72_clust_percMito.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust@meta.data) +
+    geom_jitter(mapping = aes(x      = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                              y      = percent.mito,
+                              color  = eval(as.name(paste0("RNA_snn_res.",choosenResolution)))
+                              ),
+                size    = 0.5
+                ) +
+    stat_summary(mapping = aes(x = eval(as.name(paste0("RNA_snn_res.",choosenResolution))),
+                               y = percent.mito
+                               ),
+                 fun     = median,
+                 geom    = "crossbar",
+                 width   = 0.75,
+                 color   = "blue"
+                 ) +
+    xlab(label = "\nCluster") +
+    ylab(label = "% mito genes\n")+
+    #ylim(2,5) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text            = element_text(size = 40)
+          )
+#dev.off()
+
+```
+
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.1
+min_logfc        <- 0.25
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers <- FindAllMarkers(object            = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+                                                                                                   min.pct           = min_pct,
+                                                                                                   logfc.threshold   = min_logfc,
+                                                                                                   min.diff.pct      = min_diffPct,
+                                                                                                   only.pos          = TRUE,
+                                                                                                   min.cells.feature = min_cellsFeature
+                                                                                                   )
+
+head(scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_R26P72_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10#,
+              #fontface = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P72_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_R26P72_clusterTopMarkers.pdf"), width = 16, height = 12)
+  DoHeatmap(object   = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = nTop_markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=20))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_R26P72_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 20
+scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+            file        = paste0(pathToReport,"scRNAseq_R26P72_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+# Copy file to zerkalo
+copyToZerkalo(file = paste0(pathToReport,"scRNAseq_R26P72_cluster_geneMarkers.txt"),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_R26P72_SMARCB1.pdf"), width = 12, height = 12)
+FeaturePlot(object   = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust,
+            features = "Smarcb1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = c(0.1,0.1),
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_R26P72_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = "Smarcb1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "Smarcb1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+# Cerebro analysis (for visualization purpose)
+
+## Copy seurat object
+
+```{r export_to_cerebro_format}
+
+scRNAseq_Seurat_R26P72_cerebro <- scRNAseq_Seurat_R26P72_nbGenes_percMito_norm_PCA_clust
+head(scRNAseq_Seurat_R26P72_cerebro@meta.data)
+
+```
+
+## Clusters relationship trees
+
+```{r export_to_cerebro_format}
+
+# Create vectors of clustering resolutions
+groups <- paste0('RNA_snn_res.',clustering_resolutions)
+groups
+
+# Build phylogenetic tree for clusters
+for (res in groups[-1])
+{
+    print(res)
+    Idents(scRNAseq_Seurat_R26P72_cerebro) <- res
+    scRNAseq_Seurat_R26P72_cerebro <- BuildClusterTree(object           = scRNAseq_Seurat_R26P72_cerebro,
+                                                               dims             = 1:PCmin,
+                                                               reorder          = FALSE,
+                                                               reorder.numeric  = FALSE
+                                                               )
+    scRNAseq_Seurat_R26P72_cerebro@misc$trees[[res]] <- scRNAseq_Seurat_R26P72_cerebro@tools$BuildClusterTree
+}
+
+```
+
+## Compute percentage of mitochondrial and ribosomal transcripts
+
+```{r cerebro_mito_ribo}
+
+# % of mito and ribo 
+scRNAseq_Seurat_R26P72_cerebro <- addPercentMtRibo(object             = scRNAseq_Seurat_R26P72_cerebro,
+                                                    organism           = 'mm',
+                                                    gene_nomenclature  = 'name'
+                                                    )
+
+```
+
+## Get most expressed genes
+
+```{r cerebro_most_expressed_genes}
+
+# Most expressed genes
+scRNAseq_Seurat_R26P72_cerebro <- getMostExpressedGenes(object  = scRNAseq_Seurat_R26P72_cerebro,
+                                                        assay   = 'RNA',
+                                                        groups  = groups
+                                                        )
+
+```
+
+## Get marker genes
+
+```{r cerebro_marker_genes}
+
+# Mark genes
+scRNAseq_Seurat_R26P72_cerebro <- getMarkerGenes(object    = scRNAseq_Seurat_R26P72_cerebro,
+                                                  assay     = 'RNA',
+                                                  organism  = 'mm',
+                                                  groups    = groups,
+                                                  name      = 'cerebro_seura',
+                                                  only_pos  = TRUE
+                                                  )
+
+```
+
+## Perform pathway enrichment on marker genes
+
+```{r cerebro_most_expressed_genes}
+
+# Pathway analysis
+scRNAseq_Seurat_R26P72_cerebro <- getEnrichedPathways(object              = scRNAseq_Seurat_R26P72_cerebro,
+                                                      marker_genes_input  = 'cerebro_seura',
+                                                      adj_p_cutoff        = 0.01,
+                                                      max_terms           = 100
+                                                      )
+
+```
+
+## Gene set enrichment
+
+```{r cerebro_gene_set_enrichment}
+
+# Pathway analysis
+scRNAseq_Seurat_R26P72_cerebro <- performGeneSetEnrichmentAnalysis(object  = scRNAseq_Seurat_R26P72_cerebro,
+                                                      assay                = "RNA",
+                                                      GMT_file             = paste0(pathToData,"msigdb.v5.2.symbols_mouse.gmt"),
+                                                      groups               = groups
+                                                      )
+
+```
+
+
+## Export to cerebro format
+
+```{r export_to_cerebro_format}
+
+colnames(scRNAseq_Seurat_R26P72_cerebro@meta.data)
+
+# Export to cerebro format
+exportFromSeurat(object             = scRNAseq_Seurat_R26P72_cerebro,
+                 assay              = 'RNA',
+                 slot               = 'data',
+                 file               = paste0(pathToReport,'scRNAseq_Seurat_R26P72.crb'),
+                 experiment_name    = 'scRNAseq_R26P72',
+                 organism           = 'mm',
+                 groups             = groups,
+                 nUMI               = 'nCount_RNA',
+                 nGene              = 'nFeature_RNA',
+                 add_all_meta_data  = TRUE,
+                 verbose            = FALSE
+                 )
+
+# Copy to zerkalo
+copyToZerkalo(file       = paste0(pathToReport,'scRNAseq_Seurat_R26P72.crb'),
+              zerkaloDir = "mandrian_murine_RT"
+              )
+
+```
+
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```

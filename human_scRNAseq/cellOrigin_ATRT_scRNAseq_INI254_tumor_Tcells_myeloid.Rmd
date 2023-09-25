@@ -1,0 +1,1764 @@
+
+---
+title: "Human ATRT RNAseq data"
+author: "Mamy Andrianteranagna"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 9
+    keep_md: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, include=TRUE, cache=FALSE, error=TRUE)
+
+```
+
+```{r paths}
+
+thisProject                  <- "cellOrigin_ATRT/"
+
+# Paths
+pathToRhabdoid_U830_projects <- "/bioinfo/users/mandrian/rhabdoid_U830_projects/"
+pathToProgrammes             <- paste0(pathToRhabdoid_U830_projects,"programmes/")
+pathToANALYSIS_PROJECTS      <- paste0(pathToRhabdoid_U830_projects,"ANALYSIS_PROJECTS/")
+pathToThisProject            <- paste0(pathToANALYSIS_PROJECTS,thisProject)
+pathToData                   <- paste0(pathToThisProject,"data/")
+pathToFigures                <- paste0(pathToThisProject,"svn/analyse/script/figures/")
+pathToReport                 <- paste0(pathToThisProject,"svn/analyse/report/")
+pathToRNApip_RESULT          <- paste0(pathToThisProject,"RNApip_RESULT/")
+pathToFeatureCounts          <- paste0(pathToThisProject,"FeatureCounts_RESULT/")
+
+pathToDataAnnotationFile     <- paste0(pathToRhabdoid_U830_projects,"annotation_file/")
+
+```
+
+```{r manage_renv, eval=FALSE}
+
+# Initialize Renv
+#renv::init()
+
+```
+
+
+```{r load_library, eval=FALSE}
+
+# Load RNAseq library
+source("load_scRNAseq_library.R")
+
+```
+
+```{r loading_RData, eval=FALSE}
+
+# Load saved RData
+load("cellOrigin_ATRT_scRNAseq_INI254_tumor_Tcells_myeloid.RData")
+
+#save.image(file="cellOrigin_ATRT_scRNAseq_INI254_tumor_Tcells_myeloid.RData")
+
+```
+
+```{r load_plot_function}
+
+# Load external files
+source("plot_R_util.R")
+source("/data/users/mandrian/rhabdoid_U830_projects/annotation_file/colors.R")
+
+```
+
+```{r delete_all_objects}
+
+# Delete all objects
+#rm(list = ls())
+
+```
+
+# Load data and create Seurat object
+
+## INI254 tumor
+
+```{r load_data}
+
+pathTo_INI254_tumor_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/INI254/count/INI254_count_aggr/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+INI254_tumor_data <- Read10X(data.dir         = pathTo_INI254_tumor_cellRangerCount,
+                             gene.column      = 2,
+                             unique.features  = TRUE
+                             )
+
+# Create Seurat object
+scRNAseq_Seurat_INI254_tumor <- CreateSeuratObject(counts   = INI254_tumor_data,
+                                                   project  = "INI254_tumor"
+                                                   )
+
+```
+
+## INI254 Tcells
+
+```{r load_data}
+
+pathTo_INI254_Tcells_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/INI254/count_Tcells/INI254_count_T3_aggr/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+INI254_Tcells_data <- Read10X(data.dir         = pathTo_INI254_Tcells_cellRangerCount,
+                              gene.column      = 2,
+                              unique.features  = TRUE
+                              )
+
+# Create Seurat object
+scRNAseq_Seurat_INI254_Tcells <- CreateSeuratObject(counts   = INI254_Tcells_data,
+                                                    project  = "INI254_Tcells"
+                                                    )
+
+```
+
+## INI254 myeloid
+
+```{r load_data}
+
+pathTo_INI254_myeloid_cellRangerCount <- "/data/users/mandrian/rhabdoid_U830_projects/ANALYSIS_PROJECTS/cellOrigin_ATRT/data/INI254/count_myeloid/INI254_count_T2_aggr/outs/filtered_feature_bc_matrix"
+
+# Load 10X data
+INI254_myeloid_data <- Read10X(data.dir         = pathTo_INI254_myeloid_cellRangerCount,
+                              gene.column      = 2,
+                              unique.features  = TRUE
+                              )
+
+# Create Seurat object
+scRNAseq_Seurat_INI254_myeloid <- CreateSeuratObject(counts   = INI254_myeloid_data,
+                                                    project  = "INI254_myeloid"
+                                                    )
+
+```
+
+
+# INI254_Tumor_Tcells seurat object
+
+```{r INI254_tumor_Tcells_myeloid_seurat_object}
+
+# Create named list of seurat object
+seurat_object_list <- list(INI254_tumor = scRNAseq_Seurat_INI254_tumor,
+                           INI254_Tcells = scRNAseq_Seurat_INI254_Tcells,
+                           INI254_myeloid = scRNAseq_Seurat_INI254_myeloid
+                           )
+
+# Rename cells using object name as prefix
+for (obj in names(seurat_object_list))
+{
+    seurat_object_list[[obj]] <- RenameCells(object = seurat_object_list[[obj]],
+                                             add.cell.id = obj
+                                             )
+}
+
+# INI254_Tumor_Tcells_Myeloid seurat objects
+scRNAseq_Seurat_INI254_tumor_Tcells <- merge(x           = seurat_object_list$INI254_tumor,
+                                             y           = seurat_object_list$INI254_Tcells,
+                                             merge.data  = FALSE
+                                             )
+
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid <- merge(x           = scRNAseq_Seurat_INI254_tumor_Tcells,
+                                                     y           = seurat_object_list$INI254_myeloid,
+                                                     merge.data  = FALSE,
+                                                     project     = "INI254_all"
+                                                     )
+
+
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid
+
+
+head(levels(factor(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data$orig.ident)))
+
+```
+
+## Cell QC and filtering
+
+```{r create_table_of_nbOfCell_after_filtering}
+
+# Create data frame
+cellFiltering <- data.frame(filtering = "no filtering",
+                            nbOfCells = nrow(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data)
+                            )
+
+cellFiltering
+
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_tumor_Tcells_myeloid_cellFiltering.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering,
+       mapping = aes(x = filtering,
+                     y = nbOfCells
+                     ),
+             ) +
+    geom_bar(stat = "identity",
+             fill = "black"
+             ) +
+    ylim(0,20000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Number of genes and number of RNA (UMIs)
+
+```{r number_of_genes_per_cell}
+
+head(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data)
+
+# Set minimum number of genes
+min_nFeature <- round(quantile(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data$nFeature_RNA,
+         probs = 0.05
+         ))
+min_nFeature
+
+# Density distribution of total RNA count
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_INI254_tumor_Tcells_myeloid_nbRNA.pdf"), width = 12, height = 12)
+ggplot(data = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data) +
+    geom_histogram(mapping = aes(x = nCount_RNA),
+                   fill = "yellow",
+                   color = "black",
+                   binwidth = 1000
+                   ) +
+    xlab(label = "\nnb of RNA (UMI)") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Density distribution of detected genes
+#pdf(file = paste0(pathToFigures,"histogram_scRNAseq_INI254_tumor_Tcells_myeloid_nbGenes.pdf"), width = 12, height = 12)
+ggplot() +
+    geom_histogram(data = filter(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data, nFeature_RNA >= 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "blue",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    geom_histogram(data = filter(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data, nFeature_RNA < 500),
+                   mapping = aes(x = nFeature_RNA),
+                   fill = "grey",
+                   color = "black",
+                   binwidth = 200
+                   ) +
+    xlab(label = "\nnb of genes") +
+ylab(label = "density\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30,
+                                    face = "bold"
+                                    )
+          )
+#dev.off()
+
+# Scatter plot nCount_RNA and nFeature_RNA
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data,
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA,
+                             color = orig.ident
+                             ),
+               pch = 21,
+               alpha = 0.25
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data,
+                             nFeature_RNA >= min_nFeature
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = nFeature_RNA,
+                             color = orig.ident
+                             ),
+               pch = 21
+               ) +
+    xlab(label = "\nRNA count (UMI)") +
+    ylab(label = "nb of genes\n") +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+theme_bw() +
+geom_hline(yintercept = min_nFeature,
+           color = "red",
+           lty = 2
+           ) +
+    theme(text = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = c(0.1,0.875)
+          )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_INI254_tumor_Tcells_myeloid_nbRNA_vs_nbGene.pdf"), width = 14, height = 10)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "both",
+           xparams  = list(fill = "yellow"),
+           yparams  = list(fill = "blue")
+           )
+#dev.off()
+
+# Number of gene filtering
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes <- subset(x = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid,
+                                                              subset = nFeature_RNA > min_nFeature
+                                                              )
+
+# Append cell filtering table
+cellFiltering_nbGenes <- rbind(cellFiltering,
+                               data.frame(filtering = "nb genes",
+                                          nbOfCells = nrow(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes@meta.data)
+                                          )
+                               )
+
+cellFiltering_nbGenes
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_tumor_Tcells_myeloid_cellFiltering_nbGenes.pdf"), width = 12, height = 12)
+ggplot(data = cellFiltering_nbGenes,
+       mapping = aes(x = filtering,
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,20000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_fill_manual(values = c("black","darkgreen")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 30),
+          axis.title = element_text(size = 30, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+### Mitochondrial genes
+
+```{r QC_filtering}
+
+# Import mitochondrial gene info
+pathToMitoGenes <- paste0(pathToData,"/mitochondrialRNA/group-1974.csv")
+
+mitoGenes <- read.table(file         = pathToMitoGenes,
+                        skip         = 1,
+                        header       = TRUE,
+                        quote        = '"',
+                        sep          = ",",
+                        check.names  = FALSE
+                        )
+
+head(mitoGenes)
+
+# Mitocondrial genes percentage
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes[["percent.mito"]] <- PercentageFeatureSet(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes,
+                                                                         features = as.vector(as.character(mitoGenes$`Approved symbol`)),
+                                                                         assay = "RNA"
+                                                              )
+
+# Set percentage of count falling in mitochondrial genes
+max_percOfMitoGenes <- 7.5
+
+# Scatter plot
+p <- ggplot() +
+    geom_point(data = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes@meta.data,
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito,
+                             colour = orig.ident
+                             ),
+               pch = 21,
+               alpha = 0.25
+               ) +
+    geom_point(data = filter(.data = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes@meta.data,
+                             percent.mito < max_percOfMitoGenes
+                             ),
+               mapping = aes(x = nCount_RNA,
+                             y = percent.mito,
+                             color = orig.ident
+                             ),
+               pch = 21
+               ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    xlab(label = "\nnb of RNA (UMI count)") +
+ylab(label = "\n% mito. genes\n") +
+geom_hline(yintercept = max_percOfMitoGenes,
+           color = "red",
+           lty = 2
+           ) +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = c(0.85,0.85)
+          )
+#pdf(file = paste0(pathToFigures,"scatterPlot_scRNAseq_INI254_tumor_Tcells_myeloid_nbRNA_vs_percMito.pdf"), width = 12, height = 12)
+ggMarginal(p        = p,
+           type     = "density",
+           margins  = "y",
+           fill     = "violet"
+           )
+#dev.off()
+
+# Number of feature detected for each cell
+#max_nFeature <- mean(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data$nFeature_RNA) + 2*sd(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data$nFeature_RNA)
+
+# Mitochondrial gene filtering
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito <- subset(x = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes,
+                                                               subset = percent.mito < max_percOfMitoGenes
+                                                               )
+
+# Append cell filtering table
+cellFiltering_nbGenes_percMito <- rbind(cellFiltering_nbGenes,
+                                        data.frame(filtering = "perc. mito.",
+                                                   nbOfCells = nrow(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito@meta.data)
+                                                   )
+                                        )
+
+cellFiltering_nbGenes_percMito
+
+# Barplot cell filtering table
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_tumor_Tcells_myeloid_cellFiltering_nbGenes_percMito.pdf"), width = 12, height = 8)
+ggplot(data = cellFiltering_nbGenes_percMito,
+       mapping = aes(x = reorder(filtering,-nbOfCells),
+                     y = nbOfCells,
+                     fill = filtering
+                     ),
+             ) +
+    geom_bar(stat = "identity"
+             ) +
+    ylim(0,20000) +
+    xlab(label = "\nfiltering step") +
+    ylab(label = "nb of cells\n") +
+    scale_fill_manual(values = c("darkgreen","black","green")) +
+    geom_text(aes(label = nbOfCells), size = 15, fontface = "bold", vjust = -0.1) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+```
+
+## Data normalization
+
+```{r data_normalization}
+
+# Normalization
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm <- NormalizeData(object                = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito,
+                                                                           normalization.method  = "LogNormalize",
+                                                                           scale.factor          = 10000
+                                                                           )
+
+```
+
+# Assign cell-cycle scores
+
+```{r assign_cellCycle_scores}
+
+# Cell cycle gene markers (present in Seurat)
+str(cc.genes)
+length(cc.genes$s.genes)
+length(cc.genes$g2m.genes)
+
+cc.genes$g2m.genes
+cc.genes$s.genes
+
+# Compute cell cycle scoring  
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm <- CellCycleScoring(object        = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm,
+                                   s.features    = cc.genes$s.genes,
+                                   g2m.features  = cc.genes$g2m.genes
+                                   )
+
+# Check meta data
+colnames(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm@meta.data)
+head(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm@meta.data)
+
+# Plot covariate distribution
+plot(density(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm@meta.data$S.Score))
+
+plot(density(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm@meta.data$G2M.Score))
+
+```
+
+# Pre-analysis
+
+This part of analysis aims to (1) find the minimun number of PCs and (2) look at the effect of covariates on clustering.
+
+
+## Find min number of PCs to use as PCmin in IKAP
+
+```{r feature_selection}
+
+# Highly variable genes
+nFeatures <- 2000
+variableFeatures_method <- "vst"
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA <- FindVariableFeatures(object            = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm,
+                                                                         selection.method  = variableFeatures_method,
+                                                                         nfeatures         = nFeatures
+                                                                         )
+
+# Mean-variance scatter plot
+#pdf(file = paste0(pathToFigures,"variableFeaturePlot_scRNAseq_INI254_tumor_Tcells_myeloid_PCA.pdf"), width = 12, height = 8)
+VariableFeaturePlot(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA)
+#dev.off()
+
+nrow(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA@assays$RNA)
+
+# Data scaling 
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA <- ScaleData(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA,
+                                                              features = rownames(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA)
+                                                              )
+
+# PCA
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA <- RunPCA(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA)
+
+# PCs elbow plot
+PCmin <- 8
+#pdf(file = paste0(pathToFigures,"elbowPlot_scRNAseq_INI254_tumor_Tcells_myeloid_PCA.pdf"), width = 12, height = 12)
+ElbowPlot(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA,
+          ndims = 50
+          ) +
+    geom_vline(xintercept = PCmin, lty = 2, color = "blue") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Heatmap of each PC
+#pdf(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_INI254_tumor_Tcells_myeloid_PCA.pdf"), width = 15, height = 12)
+#png(file = paste0(pathToFigures,"dimHeatmap_scRNAseq_INI254_tumor_Tcells_myeloid_PCA.png"), width = 1000, height = 800)
+DimHeatmap(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA,
+           dims = 1:20,
+           ncol = 5,
+           raster = FALSE
+           )
+#dev.off()
+
+# Plot PCA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_tumor_Tcells_myeloid_PCA.pdf"), width = 12, height = 12)
+DimPlot(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA,
+        reduction = "pca",
+        pt.size = 1
+        ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "right"
+          )
+#dev.off()
+
+```
+
+## Plot PCA and covariates
+
+```{r PCA_and_covariates}
+
+# Extract matrix
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_matrix <- as.matrix(GetAssayData(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA,
+                                                                                           slot = "scale.data"                                              )                                                                 )
+
+head(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_matrix[,1:3])
+
+# Get HVF
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_mvGenes <- HVFInfo(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA,
+                                                               selection.method = "vst"
+                                                               )
+
+head(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_mvGenes)
+nrow(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_mvGenes)
+
+# Get most variable genes
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_mvGenes[order(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_mvGenes$variance.standardized, decreasing = TRUE),] %>% .[1:nFeatures,] -> mvGenes
+
+# Subset matrix
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_matrix_mvGenes <- scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_matrix[as.vector(rownames(mvGenes)),]
+
+nrow(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_matrix_mvGenes)
+
+# PCA analysis
+PC        <- prcomp(data.frame(t(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_matrix_mvGenes)))
+eigVal    <- get_eigenvalue(PC)
+eigValPer <- round(eigVal$variance.percent, digits = 2)
+
+pci       <- data.frame(PC$x,scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm@meta.data)
+
+# Plot eigen value
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_tumor_Tcells_myeloid_PCA_eigValPer.pdf"), width = 10, height = 10)
+    #mutate(PC = paste0("PC",PC)) %>%
+ggplot() +
+    geom_bar(data = data.frame(PC = 1:50, eigValPer = eigValPer[1:50]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity"
+             ) +
+    geom_bar(data = data.frame(PC = 1:PCmin, eigValPer = eigValPer[1:PCmin]),
+             mapping = aes(x = PC, y = eigValPer),
+             stat = "identity",
+             fill = "blue"
+             ) +
+    xlab(label = "\nPC") +
+    ylab(label = "% variability (eigen value)\n") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 20),
+          axis.title = element_text(size = 20, face = "bold"),
+          legend.position = "none"
+          )
+#dev.off()
+
+# Plot PCA and sample
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_tumor_Tcells_myeloid_PCA_sample.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = orig.ident),
+               size    = 1
+               ) +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of UMIs
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_tumor_Tcells_myeloid_PCA_nbUMIs.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nCount_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of UMIs",
+                            type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and nb of genes
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_tumor_Tcells_myeloid_PCA_nbGenes.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = nFeature_RNA),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "nb of genes",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and % mito RNA
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_tumor_Tcells_myeloid_PCA_percMito.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = percent.mito),
+               size    = 1
+               ) +
+    scale_colour_continuous(name = "% mito",
+                            type = "viridis"
+                            ) +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 20),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+# Plot PCA and cell cycle phase
+#pdf(file = paste0(pathToFigures,"pca_scRNAseq_INI254_tumor_Tcells_myeloid_PCA_cellCyclePhase.pdf"), width = 12, height = 10)
+ggplot(data = pci,
+       mapping = aes(x = PC1, y = PC2)
+       ) +
+    geom_point(mapping = aes(color = Phase),
+               size    = 1#,
+               #pch     = 21
+               ) +
+    #scale_fill_continuous(type = "viridis") +
+    xlab(paste0("PC1 (",eigValPer[1]," %)")) +
+    ylab(paste0("PC2 (",eigValPer[2]," %)")) +
+    ggtitle("PCA") +
+    theme_bw()+
+    theme(text              = element_text(size = 30),
+          legend.title = element_text(face = "bold"),
+          legend.key.height = unit(1.5,"cm")
+          )
+#dev.off()
+
+```
+
+## Clustering
+
+```{r clustering}
+
+# Construct KNN graph
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust <- FindNeighbors(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA,
+                                                                        dims = 1:PCmin
+                                                                        )
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust <- FindClusters(object     = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+                                                                                            resolution = seq(from  = 0,
+                                                                                                             to    = 2,
+                                                                                                             by    = 0.1
+                                                                                                             )
+                                                                                            )      
+
+# Save seurat object
+saveRDS(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+        file   = paste0(pathToReport,"scRNAseq_Seurat_INI254_tumor_Tcells_myeloid.rds"
+                        )
+        )
+
+```
+
+## Choose the best resolution of clustering
+
+```{r choose_resolution}
+
+# Choose resolution
+#pdf(file = paste0(pathToFigures,"clustree_scRNAseq_INI254_tumor_Tcells_myeloid.pdf"), width = 10, height = 12)
+clustree(x               = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust@meta.data,
+         prefix          = "RNA_snn_res.",
+         #node_colour     = "sc3_stability",
+         layout          = "sugiyama",
+         use_core_edges  = TRUE
+         )
+#dev.off()
+
+choosenResolution <- 0.3
+
+# Clustering by modularity optimization technique
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution <- FindClusters(object     = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+                                                                                                              resolution = choosenResolution
+                                                                                                              )
+
+cell_cluster_col <- c("0"  = "chartreuse4",
+                      "1"  = "thistle",
+                      "2"  = "thistle4",
+                      "3"  = "chartreuse",
+                      "4"  = "thistle3",
+                      "5"  = "red",
+                      "6"  = "thistle1",
+                      "7"  = "grey",
+                      "8"  = "thistle2",
+                      "9"  = "tomato",
+                      "10" = "green4"
+                      )
+
+# Number of cell per cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_numberOfcellsPerCluster.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution@meta.data
+       ) +
+    stat_count(mapping = aes(x     = RNA_snn_res.0.3,
+                             fill  = orig.ident
+                             )
+               ) +
+    geom_text(mapping  = aes(x     = RNA_snn_res.0.3,
+                             label = stat(count)
+                             ),
+              stat     = "count",
+              vjust    = -0.25,
+              size     = 7.5,
+              face     = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of cells\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = c(0.85,0.85)
+              )
+#dev.off()
+
+```
+
+## UMAP
+
+```{r UMAP}
+
+# Run UMAP
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust <- RunUMAP(object       = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+                                                                                       dims         = 1:PCmin,
+                                                                                       n.neighbors  = 30
+                                                                                       )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_clust.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = paste0("RNA_snn_res.",choosenResolution),
+        label       = TRUE,
+        label.size  = 10,
+        cols = cell_cluster_col
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_clust_sample.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "orig.ident",
+        label       = TRUE,
+        label.size  = 10
+        ) +
+    theme_bw() +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## UMAP and covariates
+
+```{r umap_and_covariates}
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_clust_nbUMIs.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+            features = "nFeature_RNA",
+            reduction = "umap",
+            pt.size = 1
+            )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_clust_nbGenes.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+            features = "nCount_RNA",
+            reduction = "umap",
+            pt.size = 1
+            )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_clust_percMito.pdf"), width = 12, height = 10)
+FeaturePlot(object = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+            features = "percent.mito",
+            reduction = "umap",
+            pt.size = 1
+            )
+#dev.off()
+
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_clust_cellCyclePhase.pdf"), width = 12, height = 10)
+DimPlot(object      = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "Phase",
+        label       = FALSE,
+        label.size  = 10
+        ) +
+    theme_bw() +
+    theme(#legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+## Differential analysis
+
+### One versus all (finding cluster biomarkers)
+
+```{r diffAnalysis}
+
+# Set thresholds
+min_pct          <- 0.25
+min_logfc        <- 0.50
+min_diffPct      <- -Inf
+min_cellsFeature <- 3
+
+# Find markers for each cluster (versus all others)
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers <- FindAllMarkers(object            = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+                                                                                 min.pct           = min_pct,
+                                                                                 logfc.threshold   = min_logfc,
+                                                                                 min.diff.pct      = min_diffPct,
+                                                                                 only.pos          = TRUE,
+                                                                                 min.cells.feature = min_cellsFeature
+                                                                                 )
+
+head(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers)
+
+# Plot the number of markers detected for each cluster
+#pdf(file = paste0(pathToFigures,"barplot_scRNAseq_INI254_tumor_Tcells_myeloid_numberOfMarkers.pdf"), width = 16, height = 10)
+ggplot(data = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+       mapping = aes(x = cluster,
+                     fill = cluster
+                     )
+       ) +
+    stat_count() +
+    geom_text(mapping = aes(label = stat(count)),
+              stat = "count",
+              vjust = -0.25,
+              size = 10,
+              face = "bold"
+              ) +
+    xlab("\nCluster") +
+    ylab("# of markers\n") +
+    theme_bw() +
+        theme(text = element_text(size = 40),
+              legend.position = "none"
+              )
+#dev.off()
+
+# Look at the top n markers for each cluster
+nTop <- 5
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Select top markers for each cluster
+nTop_markers <- scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>% group_by(cluster) %>% top_n(n = nTop, wt = avg_logFC)
+
+# Heatmap of all markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_tumor_Tcells_myeloid_clusterMarkers.pdf"), width = 16, height = 10)
+DoHeatmap(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_blank())
+#dev.off()
+
+# Heatmap of top markers
+#pdf(file = paste0(pathToFigures,"heatmap_scRNAseq_INI254_tumor_Tcells_myeloid_clusterTopMarkers.pdf"), width = 16, height = 12)
+DoHeatmap(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+          features = nTop_markers$gene,
+          assay    = "RNA"
+          ) +
+    NoLegend() +
+    theme(axis.text.y = element_text(size=10))
+#dev.off()
+
+# Plot top markers for each cluster
+#pdf(file = paste0(pathToFigures,"volcanoPlot_scRNAseq_INI254_tumor_Tcells_myeloid_clusterTopMarkers.pdf"), width = 16, height = 10)
+nTop = 10
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_logFC) %>%
+    ggplot() +
+    geom_point(mapping = aes(x = avg_logFC,
+                             y = -log10(p_val_adj),
+                             size = pct.1 - pct.2 
+                             ),
+               pch = 21,
+               fill = "blue",
+               alpha = 0.5
+               ) +
+    facet_wrap(facets = ~ cluster, nrow = 2) +
+    geom_text_repel(mapping = aes(x = avg_logFC,
+                                  y = -log10(p_val_adj),
+                                  label = gene
+                                  ),
+                    size = 3
+                    ) +
+    xlab("\navg_logFC") +
+    ylab("-log10(p_val_adj)\n") +
+    theme_bw() +
+    theme(text = element_text(size = 20),
+          strip.background = element_rect(fill = "green"),
+          strip.text = element_text(face = "bold")
+          )
+#dev.off()
+
+# Export marker table
+write.table(x           = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution.markers,
+            file        = paste0(pathToReport,"scRNAseq_INI254_tumor_Tcells_myeloid_cluster_geneMarkers.txt"),
+            sep         = "\t",
+            quote       = FALSE
+            )
+
+```
+
+### SMARCB1 expression
+
+```{r SMARCB1_expression}
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_SMARCB1.pdf"), width = 12, height = 10)
+FeaturePlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+            features = "SMARCB1",
+            pt.size  = 1
+            ) +
+    ggtitle(label = "SMARCB1") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_tumor_Tcells_myeloid_ATRT_SHH_VermisAnterior_SMARCB1.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = "SMARCB1",
+        pt.size = 0
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_tumor_Tcells_myeloid_ATRT_SHH_VermisAnterior_SMARCB1_2.pdf"), width = 12, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = "SMARCB1",
+        pt.size = 0,
+        group.by = "orig.ident"
+        ) +
+    ggtitle(label = "SMARCB1") +
+    xlab("\nCluster") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5, face = "bold")
+          )
+#dev.off()
+
+```
+
+### SMARCB1 neighbor gene expression
+
+```{r SMARCB1_neighbor_gene_expression}
+
+# SMARCB1 neighbor genes
+SMARCB1_neighborGenes <- c("SMARCB1","CHCHD10","C22orf15","VPREB3","MMP11","ZNF70","DERL3","SLC2A11","MIF","GSTT2","DDTL","DDT")
+
+# SMARCB1 expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_SMARCB1_neighborGenes.pdf"), width = 16, height = 10)
+FeaturePlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+            features = SMARCB1_neighborGenes,
+            pt.size  = 0.25
+            )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_tumor_Tcells_myeloid_ATRT_SHH_VermisAnterior_SMARCB1_neighborGenes.pdf"), width = 14, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = SMARCB1_neighborGenes,
+        pt.size = 0
+        )
+#dev.off()
+
+# SMARCB1 expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_tumor_Tcells_myeloid_ATRT_SHH_VermisAnterior_SMARCB1_neighborGenes_2.pdf"), width = 14, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = SMARCB1_neighborGenes,
+        pt.size = 0,
+        group.by = "orig.ident"
+        )
+#dev.off()
+
+```
+
+### T cells signature genes
+
+```{r SMARCB1_neighbor_gene_expression}
+
+# T cell marker genes
+SMARCB1_TcellMarkers <- c("SMARCB1","IL2","CD4","CD44","STAT1","GATA3","STAT3","BNC2","FOXO4","STAT6")
+
+# T cell marker gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_SMARCB1_TcellMarkers.pdf"), width = 18, height = 8)
+FeaturePlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+            features = SMARCB1_TcellMarkers,
+            pt.size  = 0.25,
+            ncol     = 5
+            )
+#dev.off()
+
+# T cell marker gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_tumor_Tcells_myeloid_ATRT_SHH_VermisAnterior_SMARCB1_TcellMarkers.pdf"), width = 16, height = 10)
+VlnPlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = SMARCB1_TcellMarkers,
+        pt.size  = 0,
+        ncol     = 5
+        )
+#dev.off()
+
+# T cell marker gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_tumor_Tcells_myeloid_ATRT_SHH_VermisAnterior_SMARCB1_TcellMarkers_2.pdf"), width = 14, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = SMARCB1_TcellMarkers,
+        pt.size = 0,
+        group.by = "orig.ident",
+        ncol = 5
+        )
+#dev.off()
+
+```
+
+### Myeloid cells signature genes
+
+```{r SMARCB1_neighbor_gene_expression}
+
+# Myeloid cell marker genes
+SMARCB1_MyeloidcellMarkers <- c("CD68","CD163","SMARCB1")
+
+# Myeloid cell marker gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_SMARCB1_MyeloidcellMarkers.pdf"), width = 18, height = 8)
+FeaturePlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+            features = SMARCB1_MyeloidcellMarkers,
+            pt.size  = 0.25,
+            ncol     = 3
+            )
+#dev.off()
+
+# Myeloid cell marker gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_tumor_Tcells_myeloid_ATRT_SHH_VermisAnterior_SMARCB1_MyeloidcellMarkers.pdf"), width = 16, height = 10)
+VlnPlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = SMARCB1_MyeloidcellMarkers,
+        pt.size  = 0,
+        ncol     = 3
+        )
+#dev.off()
+
+# Myeloid cell marker gene expression in violin plot
+#pdf(file = paste0(pathToFigures,"violinPlot_scRNAseq_INI254_tumor_Tcells_myeloid_ATRT_SHH_VermisAnterior_SMARCB1_MyeloidcellMarkers_2.pdf"), width = 14, height = 12)
+VlnPlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust_choosenResolution,
+        features = SMARCB1_MyeloidcellMarkers,
+        pt.size = 0,
+        group.by = "orig.ident",
+        ncol = 3
+        )
+#dev.off()
+
+```
+
+### Myeloid cells signature genes
+
+```{r SMARCB1_neighbor_gene_expression}
+
+# Myeloid cell marker genes
+SMARCB1_Lympoide_MyeloidcellMarkers <- c("CD68","CD4","SMARCB1","CD45")
+
+# Myeloid cell marker gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_SMARCB1_Lympoide_MyeloidcellMarkers.pdf"), width = 20, height = 6)
+FeaturePlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+            features = SMARCB1_Lympoide_MyeloidcellMarkers,
+            pt.size  = 0.25,
+            slot     = "data",
+            cols     = c("gray","yellow","brown1","brown4"),
+            ncol     = 3
+            )
+#dev.off()
+
+```
+
+```{r myeloid_gene_expression_for_paper}
+
+# Remove T cells and myeloid cells that clustered with the tumour cells
+metaData_clean <- filter(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust@meta.data,
+                         !(orig.ident == "INI254_myeloid" & !(RNA_snn_res.0.3 %in% c(5,9)))
+                         ) %>%
+    filter(!(orig.ident == "INI254_Tcells" & !(RNA_snn_res.0.3 %in% c(0,3,9,10)))
+           )
+
+nrow(metaData_clean)
+
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_clean <- Seurat::SubsetData(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+                                                             cells = WhichCells(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust,
+                                                                                cells = rownames(metaData_clean)
+                                                                                )
+                                                             )
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_clust_sample_clean.pdf"), width = 10, height = 6)
+DimPlot(object      = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_clean,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "orig.ident",
+        label       = FALSE,
+        label.size  = 10
+        ) +
+    #theme_bw() +
+    scale_colour_manual(name = "Sample", values = c("red","green","blue")) +
+    theme(legend.position = "right",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+# Myeloid cell marker genes
+SMARCB1_Lympoide_MyeloidcellMarkers <- c("CD68","CD4","SMARCB1","CD45")
+
+# Myeloid cell marker gene expression in UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_SMARCB1_Lympoide_MyeloidcellMarkers_clean.pdf"), width = 21, height = 6)
+FeaturePlot(object   = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_clean,
+            features = SMARCB1_Lympoide_MyeloidcellMarkers,
+            pt.size  = 1,
+            slot     = "data",
+            cols     = c("gray","yellow","brown1","brown4"),
+            ncol     = 3
+            ) &
+        theme(text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+# inferCNV analysis
+
+## Create inferCNV object
+
+### Extract raw count matrix
+
+```{r extract_rawCount}
+
+# Extract raw count matrix
+scRNAseq_rawCount_INI254_tumor_Tcells_myeloid <- scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@assays$RNA@counts
+
+head(scRNAseq_rawCount_INI254_tumor_Tcells_myeloid[,1:4])
+dim(scRNAseq_rawCount_INI254_tumor_Tcells_myeloid)
+
+```
+
+### Create gene position file
+
+```{r gene_order_file}
+
+# Import gene position file
+gene_position <- read.table(file = paste0(pathToData,"gencode_v19_gen_pos.complete.txt"),
+                            header = FALSE,
+                            sep = "\t"
+                            )
+colnames(gene_position) <- c("gene","chr","start","end")
+head(gene_position)
+
+# Keep only gene name
+gene_position_plus <- mutate(gene_position,
+                             gene = gsub("\\|.*","",gene)
+                             )
+head(gene_position_plus)
+
+# Keep only genes present in matrix
+gene_position_Plus <- filter(.data = gene_position_plus,
+                             gene %in% rownames(scRNAseq_rawCount_INI254_tumor_Tcells_myeloid)
+                             )
+
+head(gene_position_Plus)
+dim(gene_position_Plus)
+
+# Remove duplicated gene name
+gene_position_PLUS <- gene_position_Plus[!duplicated(gene_position_Plus$gene),]
+
+head(gene_position_PLUS)
+dim(gene_position_PLUS)
+
+
+# Export cell annotation
+write.table(file       = "INI254_all_gene_position.txt",
+            x          = gene_position_PLUS,
+            row.names  = FALSE,
+            col.names  = FALSE,
+            quote      = FALSE,
+            sep        = "\t"
+            )
+
+```
+
+
+### Generate annotation file
+
+```{r generate_annotation_file}
+
+# Generate annotations table
+IN254_cell_annotation <- scRNAseq_Seurat_INI254_tumor_Tcells_myeloid@meta.data["orig.ident"]
+
+IN254_cell_annotation$cell_ID <- rownames(IN254_cell_annotation)
+rownames(IN254_cell_annotation) <- NULL
+
+IN254_cell_annotation$cell_type <- gsub("INI254_","",IN254_cell_annotation$orig.ident)
+
+IN254_cell_annotation$orig.ident <- NULL
+
+head(IN254_cell_annotation)
+
+levels(factor(IN254_cell_annotation$cell_type))
+
+# Export cell annotation
+write.table(file       = "IN254_all_cell_annotation.txt",
+            x          = IN254_cell_annotation,
+            row.names  = FALSE,
+            col.names  = FALSE,
+            quote      = FALSE,
+            sep        = "\t"
+            )
+
+```
+
+### Create infercnv object
+
+```{r create_infercnv_object}
+
+# Create inferCNV object
+INI254_all_infercnvObject <- CreateInfercnvObject(raw_counts_matrix        = scRNAseq_rawCount_INI254_tumor_Tcells_myeloid,
+                                                  gene_order_file          = "INI254_all_gene_position.txt",
+                                                  annotations_file         = "IN254_all_cell_annotation.txt",
+                                                  ref_group_names          = c("myeloid","Tcells"),
+                                                  delim                    = "\t",
+                                                  max_cells_per_group      = NULL,
+                                                  min_max_counts_per_cell  = NULL,
+                                                  chr_exclude              = c("chrX","chrY","chrM")
+                                                  )
+
+
+```
+
+### Run inferCNV
+
+```{r run_infercnv}
+
+# Create inferCNV object
+INI254_all_infercnvObject_res <- infercnv::run(infercnv_obj       = INI254_all_infercnvObject,
+                                               cutoff             = 0.1,
+                                               out_dir            = tempfile(), 
+                                               cluster_by_groups  = TRUE, 
+                                               denoise            = TRUE,
+                                               HMM                = TRUE,
+                                               num_threads        = 6,
+                                               no_plot            = TRUE
+                                               )
+
+```
+
+### Explore inferCNV result
+
+```{r explore_infercnv}
+
+str(INI254_all_infercnvObject_res)
+
+# Processed expession matrix
+head(INI254_all_infercnvObject_res@expr.data[,1:4])
+
+# List of normal cell indices
+INI254_all_infercnvObject_res@reference_grouped_cell_indices
+
+# List of tumor cell indices
+INI254_all_infercnvObject_res@observation_grouped_cell_indices
+
+```
+
+### Plot CNV with plot_cnv
+
+```{r plot_cnv}
+
+# Plot CNV
+plot_cnv(infercnv_obj        = INI254_all_infercnvObject_res,
+         out_dir             = "./inferCNV_INI254_all",
+         title               = "inferCNV",
+         obs_title           = "Observations (Cells)",
+         ref_title           = "References (Cells)",
+         cluster_by_groups   = TRUE,
+         cluster_references  = FALSE,
+         plot_chr_scale      = FALSE,
+         chr_lengths         = NULL,
+         k_obs_groups        = 3,
+         contig_cex          = 1,
+         x.center            = mean(infercnv_obj@expr.data),
+         x.range             = "auto",
+         hclust_method       = "ward.D",
+         custom_color_pal    = NULL,
+         color_safe_pal      = FALSE,
+         output_filename     = "INI254_all_infercnv",
+         output_format       = "pdf",
+         png_res             = 300,
+         dynamic_resize      = 0,
+         ref_contig          = NULL,
+         write_expr_matrix   = FALSE,
+         useRaster           = FALSE
+         )
+
+```
+
+### Plot CNV with ComplexHeatmap
+
+#### Plot for all chr
+
+```{r complexheatmap}
+
+# Extract processed expression data
+INI254_all_infercnvObject_res_expr <- data.frame(INI254_all_infercnvObject_res@expr.data, check.names = FALSE)
+
+head(INI254_all_infercnvObject_res_expr[,1:2])
+dim(INI254_all_infercnvObject_res_expr)
+
+# Transpose matrix
+INI254_all_infercnvObject_res_expr_t <- data.frame(t(INI254_all_infercnvObject_res_expr), check.names = FALSE)
+
+head(INI254_all_infercnvObject_res_expr_t[,1:10])
+dim(INI254_all_infercnvObject_res_expr_t)
+
+# Check order for row split
+all(IN254_cell_annotation$cell_ID == rownames(INI254_all_infercnvObject_res_expr_t))
+
+# Subset genes in matrix
+gene_position_PLUS_all <- filter(.data = gene_position_PLUS,
+                                 gene %in% colnames(INI254_all_infercnvObject_res_expr_t)
+                                 )
+
+# Order chromosome column
+chrs <- data.frame(chr = c("chr1","chr2","chr3","chr4","chr5","chr6","chr7","chr8","chr9","chr10","chr11","chr12","chr13","chr14","chr15","chr16","chr17","chr18","chr19","chr20","chr21","chr22")
+                   )
+
+gene_position_PLUS_all_plus <- left_join(x = chrs,
+                                         y = gene_position_PLUS_all,
+                                         by = "chr"
+                                         )
+
+# Check order
+all(gene_position_PLUS_all_plus$gene == colnames(INI254_all_infercnvObject_res_expr_t))
+
+INI254_all_infercnvObject_res_expr_t_all <- INI254_all_infercnvObject_res_expr_t[,as.vector(gene_position_PLUS_all_plus$gene)]
+
+all(gene_position_PLUS_all_plus$gene == colnames(INI254_all_infercnvObject_res_expr_t_all))
+
+
+
+# Import metadata from integrated analysis
+integrated_metadata <- read.table(file       = paste0(pathToReport,"scRNAseq_Seurat_integrated_metadata.csv"),
+                                  sep        = ",",
+                                  header  = TRUE
+                                  )
+head(integrated_metadata)
+
+integrated_metadata_INI254 <- filter(.data = integrated_metadata,
+                                     orig.ident == "INI254"
+                                     )
+head(integrated_metadata_INI254)
+nrow(integrated_metadata_INI254)
+
+tail(integrated_metadata_INI254$item)
+
+integrated_metadata_INI254$cell_ID <- gsub(pattern = "_1",
+                                           replacement = "",
+                                           paste0("INI254_tumor_",integrated_metadata_INI254$item)
+                                           )
+
+head(IN254_cell_annotation)
+nrow(IN254_cell_annotation)
+
+IN254_cell_annotation_plus <- merge(x      = IN254_cell_annotation,
+                                    y      = integrated_metadata_INI254[,c("cell_ID","integrated_snn_res.0.2")],
+                                    by     = 'cell_ID',
+                                    all.x  = TRUE,
+                                    all.y  = FALSE
+                                    )
+
+head(IN254_cell_annotation_plus)
+nrow(IN254_cell_annotation_plus)
+
+IN254_cell_annotation_Plus <- merge(x = IN254_cell_annotation_plus,
+                                    y = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust@meta.data["RNA_snn_res.0.3"],
+                                    by.x = "cell_ID",
+                                    by.y = 0,
+                                    all.x  = TRUE,
+                                    all.y  = FALSE
+                                    )
+
+
+# Create cluster vector color
+integrated_cluster_col <- c("2"  = "violet",
+                            "4"  = "violetred",
+                            "9"  = "blue4",
+                            "3"  = "springgreen4",
+                            "5"  = "springgreen",
+                            "6"  = "sienna1",
+                            "7"  = "sienna3",
+                            "8"  = "sienna4",
+                            "0"  = "skyblue",
+                            "1"  = "skyblue4"
+                            )
+
+# Top annotation
+row_annot_inferCNV <- HeatmapAnnotation(df = data.frame(cell_type = factor(IN254_cell_annotation_plus[,c("integrated_snn_res.0.2")])),
+                                        col = list(cell_type = integrated_cluster_col),
+                                        which = 'row'
+                                        )
+
+head(INI254_all_infercnvObject_res_expr_t_all[,1:4])
+nrow(INI254_all_infercnvObject_res_expr_t_all)
+
+# Complexheatmap
+#pdf(file = paste0(pathToFigures,"inferCNV_scRNAseq_INI254_tumor_Tcells_all.pdf"), width = 16, height = 10)
+Heatmap(matrix               = INI254_all_infercnvObject_res_expr_t_all,
+        left_annot            = row_annot_inferCNV,
+        cluster_columns      = FALSE,
+        show_row_dend        = FALSE,
+        jitter               = TRUE,
+        show_column_names    = FALSE,
+        show_row_names       = FALSE,
+        row_split            = IN254_cell_annotation$cell_type,
+        column_split         = gene_position_PLUS_all_plus$chr ,
+        column_title_rot     = 90,
+        column_order         = colnames(INI254_all_infercnvObject_res_expr_t_all),
+        row_gap              = unit(5, "mm"),
+        show_heatmap_legend  = FALSE
+        )
+#dev.off()
+
+```
+
+#### Plot for all chr for down sampled cells
+
+```{r complexheatmap}
+
+head(IN254_cell_annotation)
+
+# Remove tumor cells without cluster (filtered tumor cells)
+IN254_cell_annotation_filtTumorCells <- filter(.data     = IN254_cell_annotation_Plus,
+(cell_type == "tumor" & !is.na(integrated_snn_res.0.2)) |
+(cell_type != "tumor"& !is.na(RNA_snn_res.0.3))
+)
+
+nrow(IN254_cell_annotation_Plus)
+nrow(IN254_cell_annotation_filtTumorCells)
+
+# Down sample cells
+IN254_cell_annotation_n <- sample_n(IN254_cell_annotation_filtTumorCells,
+                                    1000
+                                    )
+
+# Top annotation
+row_annot_inferCNV_n <- HeatmapAnnotation(df = data.frame(integrated_cluster = as.character(IN254_cell_annotation_n[,c("integrated_snn_res.0.2")]),
+                                                          INI254_cluster = as.character(IN254_cell_annotation_n[,c("RNA_snn_res.0.3")])
+                                                          ),
+                                          col = list(integrated_cluster = integrated_cluster_col, INI254_cluster = cell_cluster_col),
+                                          which = 'row',
+                                          show_annotation_name = FALSE
+                                          )
+
+# Subset matrix of down sampled cells
+INI254_all_infercnvObject_res_expr_t_n <- INI254_all_infercnvObject_res_expr_t[as.vector(IN254_cell_annotation_n$cell_ID),]
+
+# Check order for row split
+all(IN254_cell_annotation_n$cell_ID == rownames(INI254_all_infercnvObject_res_expr_t_n))
+
+# Order chromosome column
+chrs <- data.frame(chr = c("chr1","chr2","chr3","chr4","chr5","chr6","chr7","chr8","chr9","chr10","chr11","chr12","chr13","chr14","chr15","chr16","chr17","chr18","chr19","chr20","chr21","chr22")
+                   )
+gene_position_PLUS_all_plus <- left_join(x = chrs,
+                                         y = gene_position_PLUS_all,
+                                         by = "chr"
+                                         )
+
+gene_position_PLUS_all_plus$chr <- factor(gene_position_PLUS_all_plus$chr,
+                                          levels = c("chr1","chr2","chr3","chr4","chr5","chr6","chr7","chr8","chr9","chr10","chr11","chr12","chr13","chr14","chr15","chr16","chr17","chr18","chr19","chr20","chr21","chr22")
+                                          )
+
+head(gene_position_PLUS_all_plus)
+
+# Check order
+all(gene_position_PLUS_all_plus$gene == colnames(INI254_all_infercnvObject_res_expr_t_n))
+
+INI254_all_infercnvObject_res_expr_t_all_n <- INI254_all_infercnvObject_res_expr_t_n[,as.vector(gene_position_PLUS_all_plus$gene)]
+
+all(gene_position_PLUS_all_plus$gene == colnames(INI254_all_infercnvObject_res_expr_t_all_n))
+
+# Complexheatmap
+#pdf(file = paste0(pathToFigures,"inferCNV_scRNAseq_INI254_tumor_Tcells_all_n.pdf"), width = 16, height = 10)
+Heatmap(matrix               = INI254_all_infercnvObject_res_expr_t_all_n,
+        left_annot            = row_annot_inferCNV_n,
+        cluster_columns      = FALSE,
+        show_row_dend        = FALSE,
+        #jitter               = TRUE,
+        show_column_names    = FALSE,
+        show_row_names       = FALSE,
+        row_split            = IN254_cell_annotation_n$cell_type,
+        column_split         = gene_position_PLUS_all_plus$chr,
+        column_title_rot     = 90,
+        #column_order         = factor(gene_position_PLUS_all_plus$chr),
+        row_gap              = unit(5, "mm"),
+        show_heatmap_legend  = FALSE
+        )
+#dev.off()
+
+scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_plus <- scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_nbGenes_percMito_norm_PCA_clust
+
+head(scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_plus@meta.data)
+
+left_join(x = rownames_to_column(.data = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_plus@meta.data,
+                                 var = "cell_ID"
+                                 ),
+          y = IN254_cell_annotation_Plus[c("cell_ID","integrated_snn_res.0.2")],
+          by = "cell_ID"
+          ) %>%
+    column_to_rownames(var = "cell_ID") -> scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_plus@meta.data
+    
+
+# Plot UMAP
+#pdf(file = paste0(pathToFigures,"umap_scRNAseq_INI254_tumor_Tcells_myeloid_clustIntegrated.pdf"), width = 12, height = 12)
+DimPlot(object      = scRNAseq_Seurat_INI254_tumor_Tcells_myeloid_plus,
+        reduction   = "umap",
+        pt.size     = 1,
+        group.by    = "integrated_snn_res.0.2",
+        label       = TRUE,
+        label.size  = 10,
+        cols = integrated_cluster_col
+        ) +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 20)
+          )
+#dev.off()
+
+```
+
+```{r plot_CNV_for_paper_figure}
+
+# For myeloid cells, remove cells that are not in cluster 5
+IN254_cell_annotation_n_myeloidCleaned <- filter(.data = IN254_cell_annotation_n,
+                                                 !(cell_type == "myeloid" & !(RNA_snn_res.0.3 %in% c(5,9)))
+                                                 )
+nrow(IN254_cell_annotation_n)
+nrow(IN254_cell_annotation_n_myeloidCleaned)
+
+IN254_cell_annotation_n_myeloidCleaned <- IN254_cell_annotation_n_myeloidCleaned[order(IN254_cell_annotation_n_myeloidCleaned$integrated_snn_res.0.2),]
+
+# Row annotation
+row_annot_inferCNV_n_myeloidCleaned <- HeatmapAnnotation(df = data.frame(integrated_cluster = as.character(IN254_cell_annotation_n_myeloidCleaned[,c("integrated_snn_res.0.2")])#,
+                                                          #INI254_cluster = as.character(IN254_cell_annotation_n_myeloidCleaned[,c("RNA_snn_res.0.3")])
+                                                                         ),
+                                                         col = list(integrated_cluster = integrated_cluster_col),
+                                                         which = 'row',
+                                                         show_annotation_name = FALSE
+                                                         )
+
+# Subset matrix of down sampled cells
+INI254_all_infercnvObject_res_expr_t_n_myeloidCleaned <- INI254_all_infercnvObject_res_expr_t[as.vector(IN254_cell_annotation_n_myeloidCleaned$cell_ID),]
+
+# Check order for row split
+all(IN254_cell_annotation_n_myeloidCleaned$cell_ID == rownames(INI254_all_infercnvObject_res_expr_t_n_myeloidCleaned))
+
+# Check order
+all(gene_position_PLUS_all_plus$gene == colnames(INI254_all_infercnvObject_res_expr_t_n_myeloidCleaned))
+
+INI254_all_infercnvObject_res_expr_t_all_n_myeloidCleaned <- INI254_all_infercnvObject_res_expr_t_n_myeloidCleaned[,as.vector(gene_position_PLUS_all_plus$gene)]
+
+all(gene_position_PLUS_all_plus$gene == colnames(INI254_all_infercnvObject_res_expr_t_all_n_myeloidCleaned))
+
+# Complexheatmap
+#pdf(file = paste0(pathToFigures,"inferCNV_scRNAseq_INI254_tumor_Tcells_all_n_myeloidCleaned.pdf"), width = 16, height = 10)
+Heatmap(matrix               = INI254_all_infercnvObject_res_expr_t_all_n_myeloidCleaned,
+        name                 = "inferCNV score",
+        left_annot           = row_annot_inferCNV_n_myeloidCleaned,
+        cluster_columns      = FALSE,
+        cluster_rows         = FALSE,
+        show_row_dend        = FALSE,
+        #jitter              = TRUE,
+        show_column_names    = FALSE,
+        show_row_names       = FALSE,
+        row_split            = IN254_cell_annotation_n_myeloidCleaned$cell_type,
+        column_split         = gene_position_PLUS_all_plus$chr,
+        column_title_rot     = 90,
+        cluster_row_slices   = FALSE,
+        row_gap              = unit(5, "mm"),
+        show_heatmap_legend  = TRUE,
+        column_title_gp      = gpar(fontsize = 15, fontface = "bold"),
+        row_title_gp      = gpar(fontsize = 20, fontface = "bold")
+        )
+#dev.off()
+
+```
+
+#### Plot for chr22 (to check SMARCB1 CNV)
+
+```{r complexheatmap}
+
+# Subset chr22 genes
+gene_position_PLUS_chr22 <- filter(.data = gene_position_PLUS,
+                                   chr   == "chr22"
+                                   )
+
+head(gene_position_PLUS_chr22)
+dim(gene_position_PLUS_chr22)
+
+# Subset chr22 genes in matrix
+gene_position_PLUS_chr22 <- filter(.data = gene_position_PLUS_chr22,
+                                   gene %in% colnames(INI254_all_infercnvObject_res_expr_t)
+                                   )
+
+
+head(gene_position_PLUS_chr22)
+dim(gene_position_PLUS_chr22)
+
+
+# Subset matrix
+INI254_all_infercnvObject_res_expr_t_chr22 <- INI254_all_infercnvObject_res_expr_t[,as.vector(gene_position_PLUS_chr22$gene)]
+
+dim(INI254_all_infercnvObject_res_expr_t_chr22)
+
+# Check order for row split
+all(IN254_cell_annotation$cell_ID == rownames(INI254_all_infercnvObject_res_expr_t_chr22))
+
+
+# Complexheatmap
+Heatmap(matrix           = INI254_all_infercnvObject_res_expr_t_chr22,
+        cluster_columns  = FALSE,
+        show_row_dend    = FALSE,
+        jitter           = TRUE,
+        show_row_names   = FALSE,
+        row_split        = IN254_cell_annotation$cell_type
+        )
+
+```
+
+
+
+# Session info
+
+```{r sessionInfo}
+
+# Session info
+sessionInfo()
+
+```
