@@ -1,0 +1,3470 @@
+---
+title: "RNAseq analysis of ATRT-SHH cell lines treated with DAPT Notch inhibitor (10 µM for 7 days)"
+output: html_notebook
+---
+
+```{r}
+# Pour savoir quels genes du tableau Genes_of_interest ne sont pas dans la matrice
+Genes_of_interest$Gene[!is.element(Genes_of_interest$Gene,TPM_matrix_SHH_DAPT$symbol)]
+Genes_of_interest$Gene[!is.element(Genes_of_interest$Gene,rownames(raw_counts_SHH_DAPT))]
+
+# Est-ce que NOTCH2 est dans ma list ?
+is.element("NOTCH2",TPM_matrix_SHH_DAPT_melt_plus$symbol)
+```
+
+# Loading packages
+
+```{r loading_packages}
+
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+# install.packages("BiocManager")
+# BiocManager::install("DESeq2")
+# BiocManager::install("ComplexHeatmap")
+# BiocManager::install("edgeR")
+# install.packages("FactoMineR")
+# install.packages("factoextra")
+# install.packages("ggVennDiagram")
+# install.packages("ggvenn")
+# install.packages('Rcpp')
+# install.packages("palmerpenguins")
+# install.packages("gsubfn")
+# install.packages("SuperExactTest")
+# install.packages("umap")
+# install.packages("Rtsne")
+# install.packages("ggbreak")
+# install.packages("jpeg")
+# install.packages("magick")
+
+library(tidyverse) # dplyr (for filter),gridExtra (to draw venn diagram),tidyr,ggplot2,purr
+library(DESeq2) # for differential analysis
+library(ComplexHeatmap) # for Heatmap(), HeatmapAnnotation()
+library(FactoMineR) # for PCA
+library(reshape2) # for fonction Melt
+library(edgeR)
+library(ggpubr)
+library(VennDiagram)
+library(grid) # title for Venn
+library(ggVennDiagram)
+library(ggvenn)
+library(Rcpp)
+library(ggrepel) #geom_text_repel
+library(palmerpenguins)
+library(gsubfn) # for strapply function
+library("SuperExactTest")
+library(ggbreak)
+library(patchwork)
+library(jpeg)
+library(magick)
+
+source("C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/Fonctions.R")
+```
+
+# Data import
+
+```{r import_data}
+
+# Import sample plan
+sample_plan_SHH_DAPT <- read.table(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Fichiers data brutes/sample_Curie_ATRTcellLines.txt",
+                              header = TRUE,
+                              sep = "\t"
+                              )
+
+sample_plan_SHH_DAPT
+
+# Import raw data matrix
+raw_counts_SHH_DAPT <- read.table(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Fichiers data brutes/matrix_refFlat_Curie_ATRTcellLines_rawCounts.txt",
+                             header = TRUE,
+                             sep = "\t"
+                             )
+
+head(raw_counts_SHH_DAPT)
+
+# Import TPM matrix
+TPM_matrix_SHH_DAPT <- read.table(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Fichiers data brutes/matrix_refFlat_Curie_ATRTcellLines_TPM.txt",
+                             header = TRUE,
+                             sep = "\t"
+                             )
+head(TPM_matrix_SHH_DAPT)
+```
+
+# Create a new column named Treatment 2 in the sample plan
+
+```{r New_column}
+
+sample_plan_SHH_DAPT$Treatment2 <- paste(sample_plan_SHH_DAPT$Patient_ID,sample_plan_SHH_DAPT$Treatment,sep = "_")
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+sample_plan_SHH_DAPT
+
+# Reorder samples in Treatment2 column
+sample_plan_SHH_DAPT$Treatment2 <- factor(sample_plan_SHH_DAPT$Treatment2, levels = c("CHLA02_DMSO","CHLA02_DAPT","CHLA05_DMSO","CHLA05_DAPT","PDX32_DMSO","PDX32_DAPT")
+                                                    )
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+```
+
+###########################
+## Unsupervised analysis ##
+###########################
+
+# Filtering
+
+```{r filtering}
+
+head(raw_counts_SHH_DAPT)
+nrow(raw_counts_SHH_DAPT)
+ncol(raw_counts_SHH_DAPT)
+
+# Put symbol as rownames # OBLIGATOIRE d'enlever la colonne symbol avant de filtrer les ZERO
+rownames(raw_counts_SHH_DAPT) <- raw_counts_SHH_DAPT$symbol
+raw_counts_SHH_DAPT$symbol <- NULL
+head(raw_counts_SHH_DAPT)
+ncol(raw_counts_SHH_DAPT)
+
+# Remove all lines where counts are all equal to zero
+raw_counts_SHH_DAPT_WZ <- raw_counts_SHH_DAPT[apply(X = raw_counts_SHH_DAPT, 
+                                          MARGIN = 1, #1 = on travaille sur les lignes, si 2=colonne
+                                          FUN = function(x) !all(x==0)
+                                          ),
+                                    ]
+
+nrow(raw_counts_SHH_DAPT)
+nrow(raw_counts_SHH_DAPT_WZ)
+head(raw_counts_SHH_DAPT_WZ)
+ncol(raw_counts_SHH_DAPT_WZ)
+```
+
+# Second step filtering, advice from Pierre Gestraud
+
+```{r second_filtering}
+
+# Create CPM matrix = nb read x 1000000 / nb total de read
+colSums(raw_counts_SHH_DAPT_WZ)
+CPM_matrix_SHH_DAPT_WZ <- raw_counts_SHH_DAPT_WZ * 1000000 / colSums(raw_counts_SHH_DAPT_WZ)
+
+head(CPM_matrix_SHH_DAPT_WZ)
+
+# Remove all lines where counts are < 1 in less than 3 samples
+CPM_matrix_SHH_DAPT_WZ_Filter <- expFilter(data = as.matrix(CPM_matrix_SHH_DAPT_WZ),
+                                                 threshold = 1,
+                                                 p = 3/ncol(raw_counts_SHH_DAPT_WZ),
+                                                 graph = TRUE
+                                                 )
+
+# Filter rawcounts matrix with genes from filtered CPM matrix
+raw_counts_SHH_DAPT_WZ_Filt <- filter(.data = raw_counts_SHH_DAPT_WZ,
+                                         rownames(raw_counts_SHH_DAPT_WZ) %in% rownames(CPM_matrix_SHH_DAPT_WZ_Filter)
+                                         )
+
+nrow(raw_counts_SHH_DAPT)
+nrow(raw_counts_SHH_DAPT_WZ)
+nrow(raw_counts_SHH_DAPT_WZ_Filt)
+
+head(raw_counts_SHH_DAPT)
+head(raw_counts_SHH_DAPT_WZ_Filt)
+
+```
+
+# Normalization: variance stabilization
+
+```{r variance_stabilisation}
+
+# Check colnames(matrix) = colonne sample_name(sample plan)
+sample_plan_SHH_DAPT$Sample_name == colnames(raw_counts_SHH_DAPT_WZ_Filt)
+
+# Create DEseq object
+dds_SHH_DAPT <- DESeqDataSetFromMatrix(countData = raw_counts_SHH_DAPT_WZ_Filt,
+                                       colData   = sample_plan_SHH_DAPT,
+                                       design    = ~1
+                                       )
+
+# Stabilize variance using rlog
+rlog_SHH_DAPT        <- rlog(dds_SHH_DAPT, blind=TRUE)
+matrix_rlog_SHH_DAPT <- assay(rlog_SHH_DAPT)
+
+head(matrix_rlog_SHH_DAPT)
+
+```
+
+# High variable genes
+
+```{r High_variable_genes}
+
+# Select highly variable genes
+mvGenes_SHH_DAPT <- genes.selection(data = matrix_rlog_SHH_DAPT,
+                               thres.num = 1000,
+                               probs = 0.25
+                               )
+length(mvGenes_SHH_DAPT)
+
+# Subset matrix
+Matrix_mvGenes_SHH_DAPT <- matrix_rlog_SHH_DAPT[mvGenes_SHH_DAPT,]
+nrow(Matrix_mvGenes_SHH_DAPT)
+head(Matrix_mvGenes_SHH_DAPT)
+dim(Matrix_mvGenes_SHH_DAPT)
+
+```
+
+# Create colors
+
+```{r create_colors}
+
+# Create colors for Treatment column
+levels(factor(sample_plan_SHH_DAPT$Treatment))
+
+my_treatment_col_SHH <- c(DMSO = "grey66",
+                          DAPT = "gold"
+                      )
+# Create colors for Patient_ID column
+levels(factor(sample_plan_SHH_DAPT$Patient_ID))
+
+my_Patient_ID_col_SHH <- c(CHLA02 = "red",
+                          CHLA05 = "forestgreen",
+                          PDX32 = "blue"
+                      )
+
+# Create colors for Treatment2 column
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+my_treatment2_col_SHH <- c(CHLA02_DMSO = "red",
+                          CHLA02_DAPT = "chocolate3",
+                          CHLA05_DMSO = "forestgreen",
+                          CHLA05_DAPT = "aquamarine",
+                          PDX32_DMSO = "blue",
+                          PDX32_DAPT = "steelblue1"
+                      )
+
+
+```
+
+# PCA analysis
+
+```{r PCA}
+
+# PCA - Treatment
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/PCA_treatment_SHH_DAPT.jpg", width = 1400, height = 1400)
+
+pca_func(matrix = Matrix_mvGenes_SHH_DAPT,
+         sampleTable = sample_plan_SHH_DAPT, 
+         highlightedVar = "Treatment", 
+         colors = my_treatment_col_SHH,
+         fontsize = 50,
+         label_fontsize = 12,
+         point_size = 20#,
+         #sampleLabel = "Patient_ID"
+         )
+
+dev.off()
+
+# PCA - Patient_ID
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/PCA_Patient_ID_SHH_DAPT.jpg", width = 1400, height = 1400)
+
+pca_func(matrix = Matrix_mvGenes_SHH_DAPT,
+         sampleTable = sample_plan_SHH_DAPT, 
+         highlightedVar = "Patient_ID", 
+         colors = my_Patient_ID_col_SHH,
+         fontsize = 50,
+         label_fontsize = 12,
+         point_size = 20
+         )
+
+dev.off()
+
+# PCA - Treatment2
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/PCA_treatment2_SHH_DAPT.jpg", width = 1600, height = 1400)
+
+pca_func(matrix = Matrix_mvGenes_SHH_DAPT,
+         sampleTable = sample_plan_SHH_DAPT, 
+         highlightedVar = "Treatment2", 
+         colors = my_treatment2_col_SHH,
+         fontsize = 50,
+         label_fontsize = 12,
+         point_size = 20#,
+         #sampleLabel = "Patient_ID"
+         )
+
+dev.off()
+
+```
+
+# UMAP
+
+```{r UMAP}
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/UMAP_treatment2_SHH_DAPT.jpg", width = 1600, height = 1400)
+umap_func(matrix = Matrix_mvGenes_SHH_DAPT,
+         sampleTable = sample_plan_SHH_DAPT, 
+         highlightedVar = "Treatment2", 
+         colors = my_treatment2_col_SHH,
+         fontsize = 50,
+         pointsize = 15
+         )
+dev.off()
+```
+
+# Hierarchical clustering
+
+```{r Hierarchical_clustering}
+  
+# Top annotation creation - column Treatment
+TopAnnot_SHH <- HeatmapAnnotation(df = sample_plan_SHH_DAPT["Treatment2"],
+                              which = "column",
+                              col = list(Treatment2 = my_treatment2_col_SHH)
+                              )
+
+# Heatmap - column Treatment
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/clustering_SHH_DAPT.jpg", width = 900, height = 700)
+
+drawHeatmap_func(matrix = Matrix_mvGenes_SHH_DAPT,
+                 fontsize = 25,
+                 top_annot = TopAnnot_SHH,
+                 show_column_names = FALSE)
+
+dev.off()
+
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/clustering_SHH_DAPT.pdf", width = 20, height = 20)
+drawHeatmap_func(matrix = Matrix_mvGenes_SHH_DAPT,
+                 fontsize = 50,
+                 top_annot = TopAnnot_SHH,
+                 show_column_names = FALSE)
+
+dev.off()
+```
+
+##################################
+## Differential analysis CHLA02 ##
+##################################
+
+# Prepare differential analysis
+
+```{r Prepare_differential_analysis_CHLA02_DAPT_vs_DMSO}
+class(raw_counts_SHH_DAPT_WZ_Filt)
+head(raw_counts_SHH_DAPT_WZ_Filt)
+
+# Create DEseq object
+dds_SHH_DAPT_treatment2 <- DESeqDataSetFromMatrix(countData = raw_counts_SHH_DAPT_WZ_Filt,
+                                       colData   = sample_plan_SHH_DAPT,
+                                       design    = ~Treatment2
+                                       )
+
+# Compute differential analysis
+Deseq_SHH_DAPT_differential2 <- DESeq(object = dds_SHH_DAPT_treatment2, 
+                  test = "Wald"
+                  )
+
+# Extract results for CHLA02_DAPT_vs_DMSO
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+res_SHH_DAPT_CHLA02_DAPT_vs_DMSO <- results(object = Deseq_SHH_DAPT_differential2, 
+               contrast = c("Treatment2","CHLA02_DAPT","CHLA02_DMSO")
+               )
+               
+head(res_SHH_DAPT_CHLA02_DAPT_vs_DMSO)  
+class(res_SHH_DAPT_CHLA02_DAPT_vs_DMSO)
+
+# Transform results as dataframe
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO <- as.data.frame(res_SHH_DAPT_CHLA02_DAPT_vs_DMSO)
+
+head(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO)
+
+# Create column for gene names
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol <- rownames(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO)
+head(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO)
+
+# Histogram of pvalue
+ggplot(data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+       mapping = aes(x = pvalue)
+       ) +
+  geom_histogram(fill="white",color="black",breaks = seq(0, 1, length.out = 25)
+      )
+
+# Histogram of pvalue en fonction de l'expression des genes
+ggplot(data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+       mapping = aes(x = pvalue)
+       ) +
+  geom_histogram(fill="white",color="black",breaks = seq(0, 1, length.out = 25)
+                ) +
+  facet_wrap(~cut_number(baseMean, 10)
+)
+
+```
+
+# Extract results for all genes (no filter) for the paper
+
+```{r Extract_results_CHLA02_DAPT_vs_DMSO_allgenes}
+
+write.table(x = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_CHLA02_DAPT_vs_DMSO_allgenes.txt",
+            sep = "\t",
+            quote = FALSE,
+            row.names = TRUE,
+            col.names = TRUE)
+```
+
+# Extract differentially expressed genes
+
+```{r Extract_differentially_expressed_genes_CHLA02_DAPT_vs_DMSO}
+
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos <- filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO, 
+                     padj <0.05, 
+                     log2FoldChange > 1
+                     )
+
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg <- filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO, 
+                     padj <0.05, 
+                     log2FoldChange < -1
+                     )
+
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1 <- filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO, 
+                     padj <0.05,
+                     abs(log2FoldChange) >= 1
+                     )
+
+head(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos)
+nrow(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos)
+nrow(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg)
+nrow(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1)
+
+write.table(x = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+write.table(x = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+write.table(x = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1.txt",
+            sep = "\n", 
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+ordered_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg <- res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg[order(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg$pvalue),]
+ordered_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg
+
+ordered_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos_log2FoldChange <- res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos[order(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos$log2FoldChange),]
+ordered_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos_log2FoldChange
+
+ordered_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos_pvalue <- res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos[order(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos$pvalue),]
+ordered_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos_pvalue
+
+
+# FoldChange of interested genes
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="NEUROG2"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="SHOX2"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="ASCL1"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="PRRX2"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="SOX9"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="SOX2"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="FOXA1"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="STAT3"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="NEUROD1"),]
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO[which(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO$symbol=="DLL1"),]
+
+
+```
+
+# Volcanoplot_CHLA02
+
+```{r Volcanoplot}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Volcanoplot_SHH_DAPT_CHLA02_DAPT_vs_DMSO.jpg", width=800, height=600)
+
+ggplot(data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+       mapping = aes(x = log2FoldChange,
+                     y = -log10(padj)
+                     )
+       ) +
+  theme_classic() +
+  geom_point(color = "grey") +
+  geom_hline(yintercept = -log10(0.05),
+             color = "black",
+             linetype = 2 # sinon "dotted"
+          ) +
+  geom_vline(xintercept = c(-1,1),
+             color = "black",
+             linetype = 2) +
+  ggtitle("CHLA02_DAPT_vs_DMSO") +
+  #scale_y_break(c(50, 130),scales = 0.5, space = 0.1, expand = TRUE) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+                              log2FoldChange > 1,
+                                            padj < 0.05
+                                            ),
+             color = "red",
+             alpha=0.4,
+             size=3
+             ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+                              log2FoldChange < -1,
+                                            padj < 0.05
+                                            ),
+             color = "blue",
+             alpha=0.4,
+             size=3
+             ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO, 
+                           symbol %in% c("HES1","HES4","HES5","HEY1","GFAP","ID4","FABP7","TTYH1","DLX2","ACTL6B","DCX","ISL1")
+                           ),
+             color = "black",
+             size = 1) +
+  geom_text_repel(data = filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO, 
+                           symbol %in% c("HES1","HES4","HES5","HEY1","GFAP","ID4","FABP7","TTYH1","DLX2","ACTL6B","DCX","ISL1")
+                           ),
+                  mapping = aes(label=symbol),
+             color = "black",
+             size = 2,
+             fontface = 3) + #italic
+  theme(axis.text.x = element_text(size = 25),
+        axis.text.y = element_text(size = 25),
+        axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),
+        axis.title = element_text(size = 30)
+        ) +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos), x=2, y=125) +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg), x=-4, y=125)
+
+
+dev.off()
+
+```
+
+# Gene Ontology
+
+```{r Gene_ontology}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/GO_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg.jpg", width=800, height=600)
+
+plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg.tsv",
+                                                   top               = 10,
+                                                   title             = NULL,
+                                                   xlim              = 30,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "dodgerblue",
+                                                   format_labels     = TRUE, # TRUE to remove "_"
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 20,
+                                                   label_fontsize    = 20
+                                      )
+
+dev.off()
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/GO_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos.jpg", width=800, height=600)
+
+plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos.tsv",
+                                                   top               = 10,
+                                                   title             = NULL,
+                                                   xlim              = 10,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "red",
+                                                   format_labels     = TRUE,
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 20,
+                                                   label_fontsize    = 20
+                                      )
+
+dev.off()
+
+```
+
+
+##################################
+## Differential analysis CHLA05 ##
+##################################
+
+# Prepare differential analysis
+
+```{r Prepare_differential_analysis_CHLA05_DAPT_vs_DMSO}
+
+# Extract results for CHLA05_DAPT_vs_DMSO
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+res_SHH_DAPT_CHLA05_DAPT_vs_DMSO <- results(object = Deseq_SHH_DAPT_differential2, 
+               contrast = c("Treatment2","CHLA05_DAPT","CHLA05_DMSO")
+               )
+               
+head(res_SHH_DAPT_CHLA05_DAPT_vs_DMSO)  
+class(res_SHH_DAPT_CHLA05_DAPT_vs_DMSO)
+
+# Transform results as dataframe
+res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO <- as.data.frame(res_SHH_DAPT_CHLA05_DAPT_vs_DMSO)
+
+head(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO)
+
+# Create column for gene names
+res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO$symbol <- rownames(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO)
+head(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO)
+
+# Histogram of pvalue
+ggplot(data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO,
+       mapping = aes(x = pvalue)
+       ) +
+  geom_histogram(fill="white",color="black",breaks = seq(0, 1, length.out = 25)
+      )
+
+# Histogram of pvalue en fonction de l'expression des genes
+ggplot(data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO,
+       mapping = aes(x = pvalue)
+       ) +
+  geom_histogram(fill="white",color="black",breaks = seq(0, 1, length.out = 25)
+                ) +
+  facet_wrap(~cut_number(baseMean, 10)
+)
+
+```
+
+# Extract differentially expressed genes
+
+```{r Extract_differentially_expressed_genes_CHLA05_DAPT_vs_DMSO}
+
+res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCpos <- filter(.data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO, 
+                     padj <0.05, 
+                     log2FoldChange > 1
+                     )
+
+res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg <- filter(.data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO, 
+                     padj <0.05, 
+                     log2FoldChange < -1
+                     )
+
+res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1 <- filter(.data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO, 
+                     padj <0.05,
+                     abs(log2FoldChange) >= 1
+                     )
+
+head(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCpos)
+nrow(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCpos)
+nrow(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg)
+nrow(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1)
+
+write.table(x = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+write.table(x = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCpos[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCpos.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+write.table(x = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+ordered_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg <- res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg[order(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg$pvalue),]
+ordered_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg
+
+```
+
+# Volcanoplot_CHLA05
+
+```{r Volcanoplot_CHLA05}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Volcanoplot_SHH_DAPT_CHLA05_DAPT_vs_DMSO.jpg", width=800, height=600)
+
+ggplot(data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO,
+       mapping = aes(x = log2FoldChange,
+                     y = -log10(padj)
+                     )
+       ) +
+  theme_classic() +
+  geom_point(color = "grey") +
+  geom_hline(yintercept = -log10(0.05),
+             color = "black",
+             linetype = 2 # sinon "dotted"
+          ) +
+  geom_vline(xintercept = c(-1,1),
+             color = "black",
+             linetype = 2) +
+  ggtitle("CHLA05_DAPT_vs_DMSO") +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO,
+                              log2FoldChange > 1,
+                                            padj < 0.05
+                                            ),
+             color = "red",
+             alpha=0.4,
+             size=3
+             ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO,
+                              log2FoldChange < -1,
+                                            padj < 0.05
+                                            ),
+             color = "blue",
+             alpha=0.4,
+             size=3
+             ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO, 
+                           symbol %in% c("HES1","HES4","HES5","HEY1","GFAP","ID4","FABP7","TTYH1","DLX2","ACTL6B","DCX","ISL1")
+                           ),
+             color = "black",
+             size = 1) +
+  geom_text_repel(data = filter(.data = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO, 
+                           symbol %in% c("HES1","HES4","HES5","HEY1","GFAP","ID4","FABP7","TTYH1","DLX2","ACTL6B","DCX","ISL1")
+                           ),
+                  mapping = aes(label=symbol),
+             color = "black",
+             size = 2,
+             fontface = 3) + #italic
+  theme(axis.text.x = element_text(size = 25),
+        axis.text.y = element_text(size = 25),
+        axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),
+        axis.title = element_text(size = 30)
+        ) +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCpos), x=1.5, y=50) +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg), x=-3, y=50)
+
+
+dev.off()
+
+```
+
+# Gene Ontology
+
+```{r Gene_ontology}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/GO_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg.jpg", width=800, height=600)
+
+plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCneg.tsv",
+                                                   top               = 10,
+                                                   title             = NULL,
+                                                   xlim              = 20,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "blue",
+                                                   format_labels     = TRUE, # TRUE to remove "_"
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 20,
+                                                   label_fontsize    = 20
+                                      )
+
+dev.off()
+```
+
+##################################
+## Differential analysis PDX32 ##
+##################################
+
+# Prepare differential analysis
+
+```{r Prepare_differential_analysis_PDX32_DAPT_vs_DMSO}
+
+# Extract results for PDX32_DAPT_vs_DMSO
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+res_SHH_DAPT_PDX32_DAPT_vs_DMSO <- results(object = Deseq_SHH_DAPT_differential2, 
+               contrast = c("Treatment2","PDX32_DAPT","PDX32_DMSO")
+               )
+               
+head(res_SHH_DAPT_PDX32_DAPT_vs_DMSO)  
+class(res_SHH_DAPT_PDX32_DAPT_vs_DMSO)
+
+# Transform results as dataframe
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO <- as.data.frame(res_SHH_DAPT_PDX32_DAPT_vs_DMSO)
+
+head(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO)
+
+# Create column for gene names
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO$symbol <- rownames(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO)
+head(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO)
+
+# Histogram of pvalue
+ggplot(data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+       mapping = aes(x = pvalue)
+       ) +
+  geom_histogram(fill="white",color="black",breaks = seq(0, 1, length.out = 25)
+      )
+
+# Histogram of pvalue en fonction de l'expression des genes
+ggplot(data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+       mapping = aes(x = pvalue)
+       ) +
+  geom_histogram(fill="white",color="black",breaks = seq(0, 1, length.out = 25)
+                ) +
+  facet_wrap(~cut_number(baseMean, 10)
+)
+
+```
+
+# Extract results for all genes (no filter) for the paper
+
+```{r Extract_results_PDX32_DAPT_vs_DMSO_allgenes}
+
+write.table(x = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_PDX32_DAPT_vs_DMSO_allgenes.txt",
+            sep = "\t",
+            quote = FALSE,
+            row.names = TRUE,
+            col.names = TRUE)
+```
+
+# Extract differentially expressed genes
+
+```{r Extract_differentially_expressed_genes_PDX32_DAPT_vs_DMSO}
+
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos <- filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO, 
+                     padj <0.05, 
+                     log2FoldChange > 1
+                     )
+
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg <- filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO, 
+                     padj <0.05, 
+                     log2FoldChange < -1
+                     )
+
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1 <- filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO, 
+                     padj <0.05,
+                     abs(log2FoldChange) >= 1
+                     )
+
+head(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos)
+nrow(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos)
+nrow(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg)
+nrow(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1)
+
+write.table(x = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+write.table(x = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+write.table(x = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1[,"symbol"],
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+
+ordered_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg <- res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg[order(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg$pvalue),]
+ordered_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg
+
+```
+
+# Volcanoplot_PDX32
+
+```{r Volcanoplot}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Volcanoplot_SHH_DAPT_PDX32_DAPT_vs_DMSO.jpg", width=800, height=600)
+
+ggplot(data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+       mapping = aes(x = log2FoldChange,
+                     y = -log10(padj)
+                     )
+       ) +
+  theme_classic() +
+  geom_point(color = "grey") +
+  geom_hline(yintercept = -log10(0.05),
+             color = "black",
+             linetype = 2 # sinon "dotted"
+          ) +
+  geom_vline(xintercept = c(-1,1),
+             color = "black",
+             linetype = 2) +
+  ggtitle("PDX32_DAPT_vs_DMSO") +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+                              log2FoldChange > 1,
+                                            padj < 0.05
+                                            ),
+             color = "red",
+             alpha=0.4,
+             size=3
+             ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+                              log2FoldChange < -1,
+                                            padj < 0.05
+                                            ),
+             color = "blue",
+             alpha=0.4,
+             size=3
+             ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO, 
+                           symbol %in% c("HES1","HES4","HES5","HEY1","GFAP","ID4","FABP7","TTYH1","DLX2","ACTL6B","DCX","ISL1")
+                           ),
+             color = "black",
+             size = 1) +
+  geom_text_repel(data = filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO, 
+                           symbol %in% c("HES1","HES4","HES5","HEY1","GFAP","ID4","FABP7","TTYH1","DLX2","ACTL6B","DCX","ISL1")
+                           ),
+                  mapping = aes(label=symbol),
+             color = "black",
+             size = 2,
+             fontface = 3) + #italic
+ theme(axis.text.x = element_text(size = 25),
+        axis.text.y = element_text(size = 25),
+        axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),
+        axis.title = element_text(size = 30)
+        ) +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos), x=2, y=100) +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg), x=-3, y=100)
+
+
+dev.off()
+
+```
+
+
+# Gene Ontology
+
+```{r Gene_ontology}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/GO_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg.jpg", width=800, height=600)
+
+plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg.tsv",
+                                                   top               = 10,
+                                                   title             = NULL,
+                                                   xlim              = 25,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "blue",
+                                                   format_labels     = TRUE, # TRUE to remove "_"
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 20,
+                                                   label_fontsize    = 20
+                                      )
+
+dev.off()
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/GO_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos.jpg", width=800, height=600)
+
+plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos.tsv",
+                                                   top               = 10,
+                                                   title             = NULL,
+                                                   xlim              = 7,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "red",
+                                                   format_labels     = TRUE, # TRUE to remove "_"
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 20,
+                                                   label_fontsize    = 20
+                                      )
+
+dev.off()
+```
+
+#########################################
+## Venn diagrams and intersection list ##
+#########################################
+
+## 3 lists - FCabs1 ##
+######################
+
+```{r Different_lists}
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol
+res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1$symbol
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol
+```
+
+# Venn diagrams FCabs1
+
+```{r Venn_FCabs1}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/Venn_SHH_DAPT_3cellLines_FCabs1.jpg", width=800, height=600)
+ggVennDiagram(list(CHLA02 = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol,
+                   CHLA05 = res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1$symbol,
+                   PDX32 = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol
+                   ),
+              label_alpha = 0,
+              label_size = 14,
+              label = "count",
+              set_size = 7,
+              edge_size = 6) + 
+              scale_fill_gradient(low="white",high = "white") +
+  scale_color_manual(values = c("forestgreen","steelblue3","orange1") 
+                     )
+dev.off()
+```
+
+# Statistical test of intersection
+
+```{r Statistical_test_of_intersection}
+
+MSET_res <- MSET(x = list(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol,
+         res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1$symbol,
+         res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol),
+     n = 21000,
+     lower.tail=FALSE
+     )
+
+MSET_res$intersects
+MSET_res$p.value
+
+superexactTest_res <- supertest(x = list(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol,
+         res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1$symbol,
+         res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol),
+     n = 21000
+     )
+
+summary(superexactTest_res)
+
+plot(superexactTest_res)
+
+```
+
+# Intersection list
+
+```{r Intersection_list}
+
+Intersect_SHH_DAPT_DEG_CHLA02_CHLA05_FCabs1 <- intersect(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol,
+                                                    res_df_SHH_DAPT_CHLA05_DAPT_vs_DMSO_FCabs1$symbol)
+
+Intersect_SHH_DAPT_DEG_CHLA02_CHLA05_PDX32_FCabs1 <- intersect(Intersect_SHH_DAPT_DEG_CHLA02_CHLA05_FCabs1,
+                                                          res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol)
+
+Intersect_SHH_DAPT_DEG_CHLA02_CHLA05_PDX32_FCabs1
+                                                          
+
+write.table(x = Intersect_SHH_DAPT_DEG_CHLA02_CHLA05_PDX32_FCabs1,
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/Intersect_SHH_DAPT_DEG_CHLA02_CHLA05_PDX32_FCabs1.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+```
+
+# Gene Ontology of intersection list
+
+```{r Gene_Ontology_Intersection_list}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/GO_Intersect_SHH_DAPT_DEG_CHLA02_CHLA05_PDX32_FCabs1.jpg", width=800, height=600)
+plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/overlap_Intersect_SHH_DAPT_DEG_CHLA02_CHLA05_PDX32_FCabs1.tsv",
+                                       top               = 10,
+                                       title             = NULL,
+                                       xlim              = 10,
+                                       sep               = "\t",
+                                       quote             = NULL,
+                                       selected_geneSet  = NULL,
+                                       fill              = "grey",
+                                       format_labels     = TRUE, # TRUE to remove "GO_"
+                                       prefixToremove = "GOBP",
+                                       fontsize          = 20,
+                                       label_fontsize    = 20
+                                      )
+
+dev.off()
+```
+
+
+## 2 lists - FCabs1 ##
+######################
+
+```{r Different_lists}
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol
+```
+
+# Venn diagrams FCabs1
+
+```{r Venn_FCabs1}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/Venn_SHH_DAPT_2cellLines_FCabs1.jpg", width=800, height=600)
+ggVennDiagram(list(CHLA02 = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol,
+                   PDX32 = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol
+                   ),
+              label_alpha = 0,
+              label_size = 14,
+              label = "count",
+              set_size = 7,
+              edge_size = 6) + 
+              scale_fill_gradient(low="white",high = "white") +
+  scale_color_manual(values = c("forestgreen","orange1") 
+                     )
+dev.off()
+```
+
+# Hypergeometrix test
+
+```{r Hypergeometrix_test}
+
+computeHypergeometrix_pval(x = as.vector(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol),
+                           y = as.vector(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol),
+                           intersect = NULL,
+                           N = 21000)
+```
+
+# Intersection list
+
+```{r Intersection_list}
+
+Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCabs1 <- intersect(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCabs1$symbol,
+                                                    res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCabs1$symbol)
+
+Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCabs1
+                                                          
+
+write.table(x = Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCabs1,
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCabs1.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+```
+
+# Gene Ontology of intersection list
+
+```{r Gene_Ontology_Intersection_list}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/GO_Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCabs1.jpg", width=800, height=600)
+plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/overlap_Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCabs1.tsv",
+                                       top               = 10,
+                                       title             = NULL,
+                                       xlim              = 15,
+                                       sep               = "\t",
+                                       quote             = NULL,
+                                       selected_geneSet  = NULL,
+                                       fill              = "grey",
+                                       format_labels     = TRUE, # TRUE to remove "GO_"
+                                       prefixToremove = "GOBP",
+                                       fontsize          = 20,
+                                       label_fontsize    = 20
+                                      )
+
+dev.off()
+```
+
+## 2 lists - FCpos ##
+######################
+
+```{r Different_lists}
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos$symbol
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos$symbol
+```
+
+# Venn diagrams FCpos
+
+```{r Venn_FCpos}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/Venn_SHH_DAPT_2cellLines_FCpos.jpg", width=800, height=600)
+ggVennDiagram(list(CHLA02 = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos$symbol,
+                   PDX32 = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos$symbol
+                   ),
+              label_alpha = 0,
+              label_size = 14,
+              label = "count",
+              set_size = 7,
+              edge_size = 6) + 
+              scale_fill_gradient(low="white",high = "white") +
+  scale_color_manual(values = c("forestgreen","orange1") 
+                     )
+dev.off()
+```
+
+# Hypergeometrix test
+
+```{r Hypergeometrix_test}
+
+computeHypergeometrix_pval(x = as.vector(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos$symbol),
+                           y = as.vector(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos$symbol),
+                           intersect = NULL,
+                           N = 21000)
+```
+
+# Intersection list
+
+```{r Intersection_list}
+
+Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCpos <- intersect(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos$symbol,
+                                                    res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos$symbol)
+
+Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCpos
+                                                          
+
+write.table(x = Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCpos,
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCpos.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+```
+
+
+## 2 lists - FCneg ##
+######################
+
+```{r Different_lists}
+res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg$symbol
+res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg$symbol
+```
+
+# Venn diagrams FCneg
+
+```{r Venn_FCneg}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/Venn_SHH_DAPT_2cellLines_FCneg.jpg", width=800, height=600)
+ggVennDiagram(list(CHLA02 = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg$symbol,
+                   PDX32 = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg$symbol
+                   ),
+              label_alpha = 0,
+              label_size = 14,
+              label = "count",
+              set_size = 7,
+              edge_size = 6) + 
+              scale_fill_gradient(low="white",high = "white") +
+  scale_color_manual(values = c("forestgreen","orange1") 
+                     )
+dev.off()
+```
+
+# Hypergeometrix test
+
+```{r Hypergeometrix_test}
+
+computeHypergeometrix_pval(x = as.vector(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg$symbol),
+                           y = as.vector(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg$symbol),
+                           intersect = NULL,
+                           N = 21000)
+```
+
+# Intersection list
+
+```{r Intersection_list}
+
+Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCneg <- intersect(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg$symbol,
+                                                    res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg$symbol)
+
+Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCneg
+                                                          
+
+write.table(x = Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCneg,
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCneg.txt",
+            sep = "\n",
+            quote = FALSE,
+            row.names = FALSE,
+            col.names = FALSE)
+```
+
+# Gene Ontology of intersection list
+
+```{r Gene_Ontology_Intersection_list}
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/GO_Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCneg.jpg", width=800, height=600)
+plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Venn_Intersection/overlap_Intersect_SHH_DAPT_DEG_CHLA02_PDX32_FCneg.tsv",
+                                       top               = 10,
+                                       title             = NULL,
+                                       xlim              = 18,
+                                       sep               = "\t",
+                                       quote             = NULL,
+                                       selected_geneSet  = NULL,
+                                       fill              = "blue",
+                                       format_labels     = TRUE, # TRUE to remove "GO_"
+                                       prefixToremove = "GOBP",
+                                       fontsize          = 20,
+                                       label_fontsize    = 20
+                                      )
+
+dev.off()
+```
+
+###################################################
+## Expression of genes of interest with TPM data ##
+###################################################
+
+# Prepare TPM matrix
+
+```{r Prepare_TPM_matrix}
+
+## To be able to use ggplot, our table needs to be in long format. Wide table is transformed to long table by melt() function.
+
+# Melt matrix
+head(TPM_matrix_SHH_DAPT)
+
+TPM_matrix_SHH_DAPT_melt <- melt(TPM_matrix_SHH_DAPT) # Melt matrix is in long format 
+                                                                  # Add melt(as.matrix(TPM_matrix_I2A_3b3aSB1DAC)) si on a fait une manipulation de la matrice TPM lors du 2eme filtre par ex
+
+head(TPM_matrix_SHH_DAPT_melt)
+
+# Rename columns in melt matrix to be the same as in sample plan
+head(sample_plan_SHH_DAPT)
+levels(factor(sample_plan_SHH_DAPT$Sample_name))
+
+colnames(TPM_matrix_SHH_DAPT_melt) <- c("symbol","Sample_name","TPM")
+
+# Reorder samples in Treatment column
+levels(factor(sample_plan_SHH_DAPT$Treatment))
+sample_plan_SHH_DAPT$Treatment <- factor(sample_plan_SHH_DAPT$Treatment, levels = c("DMSO","DAPT"))
+
+# Merge sample plan and melt matrix
+TPM_matrix_SHH_DAPT_melt_plus <- merge(x = TPM_matrix_SHH_DAPT_melt, 
+                                  y = sample_plan_SHH_DAPT, 
+                                  by = "Sample_name"
+                                  )
+head(TPM_matrix_SHH_DAPT_melt_plus)
+
+# Distribution of TPM
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus,
+       mapping = aes(x = TPM)
+       )+
+  geom_density()
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus,
+       mapping = aes(x = log2(TPM+1))
+       )+
+  geom_density()+
+  geom_vline(xintercept = 2,
+             color = "green")
+```
+
+# HES1 boxplot
+
+```{r HES1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select HES1 gene
+TPM_matrix_SHH_DAPT_melt_plus_HES1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="HES1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_HES1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_HES1)
+
+# Boxplot HES1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_HES1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_HES1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("HES1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,9) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 7.5
+                     )
+dev.off()
+```
+
+# HES5 boxplot
+
+```{r HES5_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select HES5 gene
+TPM_matrix_SHH_DAPT_melt_plus_HES5 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="HES5"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_HES5)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_HES5)
+
+# Boxplot HES5
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_HES5.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_HES5,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("HES5") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,9) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 7.5
+                     )
+dev.off()
+
+```
+
+# HES4 boxplot
+
+```{r HES4_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select HES4 gene
+TPM_matrix_SHH_DAPT_melt_plus_HES4 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="HES4"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_HES4)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_HES4)
+
+# Boxplot HES4
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_HES4.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_HES4,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("HES4") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,10) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 9
+                     )
+dev.off()
+
+```
+
+# NOTCH3 boxplot
+
+```{r NOTCH3_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select NOTCH3 gene
+TPM_matrix_SHH_DAPT_melt_plus_NOTCH3 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="NOTCH3"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_NOTCH3)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_NOTCH3)
+
+# Boxplot NOTCH3
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_NOTCH3.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_NOTCH3,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("NOTCH3") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,10) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 9
+                     )
+dev.off()
+
+```
+
+# NOTCH1 boxplot
+
+```{r NOTCH1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select NOTCH1 gene
+TPM_matrix_SHH_DAPT_melt_plus_NOTCH1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="NOTCH1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_NOTCH1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_NOTCH1)
+
+# Boxplot NOTCH1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_NOTCH1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_NOTCH1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("NOTCH1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,10) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 9
+                     )
+dev.off()
+
+```
+
+# NOTCH2 boxplot
+
+```{r NOTCH2_boxplot}
+
+is.element("NOTCH2",TPM_matrix_SHH_DAPT_melt_plus$symbol)
+
+# Select NOTCH2 gene
+TPM_matrix_SHH_DAPT_melt_plus_NOTCH2 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="NOTCH2"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_NOTCH2)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_NOTCH2)
+
+# Boxplot NOTCH2
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_NOTCH2.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_NOTCH2,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("NOTCH2") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,10) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 9
+                     )
+dev.off()
+
+```
+
+# NEUROD1 boxplot
+
+```{r NEUROD1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select NEUROD1 gene
+TPM_matrix_SHH_DAPT_melt_plus_NEUROD1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="NEUROD1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_NEUROD1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_NEUROD1)
+
+# Boxplot NEUROD1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_NEUROD1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_NEUROD1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("NEUROD1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,2.5) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 1
+                     )
+dev.off()
+
+```
+
+# NEUROG2 boxplot
+
+```{r NEUROG2_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select NEUROG2 gene
+TPM_matrix_SHH_DAPT_melt_plus_NEUROG2 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="NEUROG2"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_NEUROG2)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_NEUROG2)
+
+# Boxplot NEUROG2
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_NEUROG2.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_NEUROG2,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("NEUROG2") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,6) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 5.5
+                     )
+dev.off()
+
+```
+
+# FOXA1 boxplot
+
+```{r FOXA1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select FOXA1 gene
+TPM_matrix_SHH_DAPT_melt_plus_FOXA1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="FOXA1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_FOXA1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_FOXA1)
+
+# Boxplot FOXA1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_FOXA1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_FOXA1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("FOXA1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,3) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 2.7
+                     )
+dev.off()
+
+```
+
+# SHOX2 boxplot
+
+```{r SHOX2_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select SHOX2 gene
+TPM_matrix_SHH_DAPT_melt_plus_SHOX2 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="SHOX2"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_SHOX2)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_SHOX2)
+
+# Boxplot SHOX2
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_SHOX2.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_SHOX2,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("SHOX2") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,5) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 4.5
+                     )
+dev.off()
+
+```
+
+# GFAP boxplot
+
+```{r GFAP_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select GFAP gene
+TPM_matrix_SHH_DAPT_melt_plus_GFAP <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="GFAP"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_GFAP)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_GFAP)
+
+# Boxplot GFAP
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_GFAP.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_GFAP,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("GFAP") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,10) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 9.1
+                     )
+dev.off()
+
+```
+
+# FABP7 boxplot
+
+```{r FABP7_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select FABP7 gene
+TPM_matrix_SHH_DAPT_melt_plus_FABP7 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="FABP7"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_FABP7)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_FABP7)
+
+# Boxplot FABP7
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_FABP7.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_FABP7,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("FABP7") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,11) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 10
+                     )
+dev.off()
+
+```
+
+# TTYH1 boxplot
+
+```{r TTYH1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select TTYH1 gene
+TPM_matrix_SHH_DAPT_melt_plus_TTYH1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="TTYH1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_TTYH1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_TTYH1)
+
+# Boxplot TTYH1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_TTYH1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_TTYH1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("TTYH1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,11.5) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 10.5
+                     )
+dev.off()
+
+```
+
+# ID4 boxplot
+
+```{r ID4_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select ID4 gene
+TPM_matrix_SHH_DAPT_melt_plus_ID4 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="ID4"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_ID4)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_ID4)
+
+# Boxplot ID4
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_ID4.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_ID4,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("ID4") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,11.5) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 10.5
+                     )
+dev.off()
+
+```
+
+# DLL3 boxplot
+
+```{r DLL3_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select DLL3 gene
+TPM_matrix_SHH_DAPT_melt_plus_DLL3 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="DLL3"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_DLL3)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_DLL3)
+
+# Boxplot DLL3
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_DLL3.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_DLL3,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("DLL3") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,12) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 11
+                     )
+dev.off()
+
+```
+
+# DLL1 boxplot
+
+```{r DLL1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select DLL1 gene
+TPM_matrix_SHH_DAPT_melt_plus_DLL1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="DLL1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_DLL1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_DLL1)
+
+# Boxplot DLL1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_DLL1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_DLL1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("DLL1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,10) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 9
+                     )
+dev.off()
+
+```
+
+# DLL4 boxplot
+
+```{r DLL4_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select DLL4 gene
+TPM_matrix_SHH_DAPT_melt_plus_DLL4 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="DLL4"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_DLL4)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_DLL4)
+
+# Boxplot DLL4
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_DLL4.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_DLL4,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("DLL4") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,8) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 7.5
+                     )
+dev.off()
+
+```
+
+# DLK1 boxplot
+
+```{r DLK1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select DLK1 gene
+TPM_matrix_SHH_DAPT_melt_plus_DLK1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="DLK1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_DLK1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_DLK1)
+
+# Boxplot DLK1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_DLK1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_DLK1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("DLK1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,8) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 7.5
+                     )
+dev.off()
+
+```
+
+# DLX2 boxplot
+
+```{r DLX2_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select DLX2 gene
+TPM_matrix_SHH_DAPT_melt_plus_DLX2 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="DLX2"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_DLX2)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_DLX2)
+
+# Boxplot DLX2
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_DLX2.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_DLX2,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("DLX2") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,8) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 7.5
+                     )
+dev.off()
+
+```
+
+# DCX boxplot
+
+```{r DCX_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select DCX gene
+TPM_matrix_SHH_DAPT_melt_plus_DCX <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="DCX"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_DCX)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_DCX)
+
+# Boxplot DCX
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_DCX.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_DCX,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("DCX") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,2.5) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 1.5
+                     )
+dev.off()
+
+```
+
+# ASCL1 boxplot
+
+```{r ASCL1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select ASCL1 gene
+TPM_matrix_SHH_DAPT_melt_plus_ASCL1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="ASCL1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_ASCL1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_ASCL1)
+
+# Boxplot ASCL1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_ASCL1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_ASCL1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("ASCL1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,13) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 12
+                     )
+dev.off()
+
+```
+
+# ISL1 boxplot
+
+```{r ISL1_boxplot}
+
+levels(factor(sample_plan_SHH_DAPT$Treatment2))
+
+# Select ISL1 gene
+TPM_matrix_SHH_DAPT_melt_plus_ISL1 <- filter(.data = TPM_matrix_SHH_DAPT_melt_plus,
+                                           symbol=="ISL1"
+                                           )
+head(TPM_matrix_SHH_DAPT_melt_plus_ISL1)
+nrow(TPM_matrix_SHH_DAPT_melt_plus_ISL1)
+
+# Boxplot ISL1
+
+pdf(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/Boxplots/Boxplot_SHHDAPT_ISL1.pdf", width=4.5, height=5)
+
+ggplot(data = TPM_matrix_SHH_DAPT_melt_plus_ISL1,
+       mapping = aes(x = Treatment,
+                     y = log2(TPM+1)
+                     )
+       ) +
+  facet_wrap(~Patient_ID) + 
+  theme_bw() +
+  theme(legend.position="none",
+        strip.text.x = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 20, face = "bold")
+        ) +
+  ggtitle("ISL1") +
+  ylab("Expression (log2)") +
+  geom_boxplot(aes(fill=Treatment),position=position_dodge(0.9)) +
+  scale_fill_manual(values=c("sienna4", "gold")) +
+  geom_point(size = 1, colour = "black",position=position_dodge(0.9)) +
+  geom_hline(yintercept = 2,
+             linetype = 2,
+             color = "black") +
+  ylim(0,8) +
+  theme(axis.text.x = element_text(angle = 50,vjust = 1,hjust = 1, size=15),
+        axis.text.y = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.size = unit(1.25, "cm"),
+        legend.key.width = unit(1.25,"cm") 
+        ) +
+  stat_compare_means(comparisons = list(c("DMSO", "DAPT")),
+                     method = "t.test",
+                     size = 4.5,
+                     tip.length = 0.02,
+                     label = "p.signif",
+                     vjust = 0.05,
+                     #hide.ns = TRUE,
+                     label.y    = 7.5
+                     )
+dev.off()
+
+```
+
+
+
+
+###################################
+## HEATMAP with INTERESTED GENES ##
+###################################
+
+# Import Genes_of_interest table
+
+```{r Import_Genes_of_interest_table}
+
+Genes_of_interest <- read.table(file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Genes_of_interest.csv",
+                              header = TRUE,
+                              sep = ";",
+                              check.names = FALSE
+                              )
+
+Genes_of_interest
+nrow(Genes_of_interest)
+```
+
+# Filter genes to keep only the genes to show
+
+```{r Filter_genes_to_show}
+
+Genes_of_interest <- filter(.data = Genes_of_interest, 
+                            Show == "yes")
+nrow(Genes_of_interest)
+```
+
+# Create color code for category column
+
+```{r color_category}
+
+levels(factor(Genes_of_interest$`Gene category`))
+
+col_gene_category <- c("Stem cell" = "pink",
+                       "Neuronal progenitor markers" = "brown",
+                       "NOTCH signaling pathway" = "darkorange"
+                       )
+```
+
+# Filter TPM matrix with genes of interest
+
+```{r Filter_TPM_matrix_interest_genes}
+
+# Put symbol as rownames
+head(TPM_matrix_SHH_DAPT)
+TPM_matrix_SHH_DAPT_2 <- column_to_rownames(TPM_matrix_SHH_DAPT,
+                                            var = "symbol")
+head(TPM_matrix_SHH_DAPT_2)
+
+
+# Subset matrix
+TPM_matrix_SHH_DAPT_Genes_of_interest <- TPM_matrix_SHH_DAPT_2[Genes_of_interest$Gene,]
+head(TPM_matrix_SHH_DAPT_Genes_of_interest)
+nrow(TPM_matrix_SHH_DAPT_Genes_of_interest)
+```
+
+## ALL 3 cell lines ##
+######################
+
+# Hierarchical clustering
+
+```{r Hierarchical_clustering}
+  
+# Top annotation creation - column
+TopAnnot <- HeatmapAnnotation(df = sample_plan_SHH_DAPT["Treatment"],
+                              which = "column",
+                              col = list(Treatment = my_treatment_col_SHH)
+                              )
+
+# Top annotation creation - row
+RowAnnot <- HeatmapAnnotation(df = Genes_of_interest["Gene category"],
+                              which = "row",
+                              col = list(Gene_category = col_gene_category),
+                              show_legend = FALSE
+                              
+                              )
+
+# Draw heatmap
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/clustering_SHH_DAPT_Genes_of_interest_3CellLines.jpg", width = 700, height = 600)
+
+Heatmap(matrix = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest))),
+        top_annotation = TopAnnot,
+        right_annotation = RowAnnot,
+        cluster_rows = FALSE, # not perform clustering on the rows
+        row_split = Genes_of_interest$Gene_category,
+        column_split = sample_plan_SHH_DAPT$Patient_ID,
+        row_names_side = "left",
+        row_title = levels(factor(Genes_of_interest$Gene_category)),
+        show_column_names = FALSE,
+        row_title_side = "right",
+        row_title_rot = 0, # To have row titles horizontally
+        cluster_column_slices = FALSE,
+        row_names_gp = gpar(fontsize = 20),
+        row_title_gp = gpar(fontsize = 20),
+        column_title_gp = gpar(fontsize = 20)
+        )
+
+dev.off()
+
+?scale
+```
+
+## ONLY CHLA02 and PDX32 ##
+###########################
+
+# Subset sample plan to keep only CHLA02 and PDX32 data
+
+```{r Subset_sample_plan}
+
+# Subset sample_plan removing CHLA05
+sample_plan_SHH_DAPT_CHLA02PDX32only <- filter(.data=sample_plan_SHH_DAPT, 
+                                            Patient_ID %in% c("CHLA02","PDX32")
+                                            )
+dim(sample_plan_SHH_DAPT)
+dim(sample_plan_SHH_DAPT_CHLA02PDX32only)
+```
+
+# Subset TPM matrix to keep only CHLA02 and PDX32 data
+
+```{r Subset_TPM_matrix}
+
+# Subset TPM data matrix removing CHLA05
+TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA02PDX32only <- TPM_matrix_SHH_DAPT_Genes_of_interest[,sample_plan_SHH_DAPT_CHLA02PDX32only$Sample_name]
+head(TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA02PDX32only)
+```
+
+# Hierarchical clustering
+
+```{r Hierarchical_clustering}
+  
+# Top annotation creation - column
+TopAnnot_CHLA02PDX32only <- HeatmapAnnotation(df = sample_plan_SHH_DAPT_CHLA02PDX32only["Treatment"],
+                              which = "column",
+                              col = list(Treatment = my_treatment_col_SHH)
+                              )
+
+# Top annotation creation - row
+RowAnnot <- HeatmapAnnotation(df = Genes_of_interest["Gene category"],
+                              which = "row",
+                              col = list(Gene_category  = col_gene_category),
+                              show_legend = FALSE
+                              
+                              )
+
+# Draw heatmap
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/clustering_SHH_DAPT_Genes_of_interest_CHLA02PDX32only.jpg", width = 700, height = 600)
+
+Heatmap(matrix = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA02PDX32only))),
+        top_annotation = TopAnnot_CHLA02PDX32only,
+        right_annotation = RowAnnot,
+        cluster_rows = FALSE, # not perform clustering on the rows
+        row_split = Genes_of_interest$Gene_category ,
+        column_split = sample_plan_SHH_DAPT_CHLA02PDX32only$Patient_ID,
+        row_names_side = "left",
+        row_title = levels(factor(Genes_of_interest$Gene_category )),
+        show_column_names = FALSE,
+        row_title_side = "right",
+        row_title_rot = 0, # To have row titles horizontally
+        cluster_column_slices = FALSE,
+        row_names_gp = gpar(fontsize = 20),
+        row_title_gp = gpar(fontsize = 20),
+        column_title_gp = gpar(fontsize = 20)
+        )
+
+dev.off()
+```
+
+## CHLA02 ##
+############
+
+# Subset sample plan to keep only CHLA02 data
+
+```{r Subset_sample_plan}
+
+# Subset sample_plan
+sample_plan_SHH_DAPT_CHLA02 <- filter(.data=sample_plan_SHH_DAPT, 
+                                            Patient_ID %in% c("CHLA02")
+                                            )
+dim(sample_plan_SHH_DAPT)
+dim(sample_plan_SHH_DAPT_CHLA02)
+```
+
+# Subset TPM matrix to keep only CHLA02
+
+```{r Subset_TPM_matrix}
+
+# Subset TPM data matrix removing CHLA05
+TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA02 <- TPM_matrix_SHH_DAPT_Genes_of_interest[,sample_plan_SHH_DAPT_CHLA02$Sample_name]
+head(TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA02)
+```
+
+# Hierarchical clustering CHLA02
+
+```{r Hierarchical_clustering}
+  
+# Top annotation creation - column
+TopAnnot_CHLA02 <- HeatmapAnnotation(df = sample_plan_SHH_DAPT_CHLA02["Treatment"],
+                              which = "column",
+                              col = list(Treatment = my_treatment_col_SHH),
+                              annotation_legend_param = list(title = "Treatment", 
+                                                             title_gp = gpar(fontsize = 25),
+                                                             labels_gp = gpar(fontsize = 20))
+                                    )
+                              
+
+# Top annotation creation - row
+RowAnnot <- HeatmapAnnotation(df = Genes_of_interest["Gene category"],
+                              which = "row",
+                              col = list(`Gene category` = col_gene_category),
+                              show_legend = TRUE,
+                              show_annotation_name = FALSE,
+                              annotation_legend_param = list(title = "Gene category",
+                                                             at = levels(factor(Genes_of_interest$`Gene category`)),
+                                                             labels = c("Neuronal progenitor markers","Notch signaling pathway","Stem cell"),
+                                                             title_gp = gpar(fontsize = 25),
+                                                             labels_gp = gpar(fontsize = 20)
+                                                             )
+                              )
+
+# Draw heatmap
+
+heatmap <- Heatmap(matrix = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA02))),
+        top_annotation = TopAnnot_CHLA02,
+        left_annotation = RowAnnot,
+        cluster_rows = FALSE, # not perform clustering on the rows
+        row_split = Genes_of_interest$`Gene category`,
+        column_split = sample_plan_SHH_DAPT_CHLA02$Patient_ID,
+        row_names_side = "right",
+        #row_title = levels(factor(Genes_of_interest$`Gene category`)),
+        show_column_names = FALSE,
+        #row_title_side = "left",
+        #row_title_rot = 0, # To have row titles horizontally
+        row_title = NULL,
+        cluster_column_slices = FALSE,
+        row_names_gp = gpar(fontsize = 20),
+        row_title_gp = gpar(fontsize = 20),
+        column_title_gp = gpar(fontsize = 20),
+        heatmap_legend_param = list(title = "scaled log2(TPM+1)",
+                                    legend_height = unit(4, "cm"),
+                                    #title_position = "leftcenter-rot",
+                                    direction = "horizontal"
+                                    )
+        )
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/clustering_SHH_DAPT_Genes_of_interest_CHLA02.jpg", width = 700, height = 600)
+draw(heatmap, heatmap_legend_side = "bottom", annotation_legend_side = "bottom", merge_legend = TRUE)
+dev.off()
+```
+
+# Extract TPM data for the paper
+
+```{r Extract_TPMdata_CHLA02}
+
+write.table(x = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA02))),
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/TPM_data/TPM_data_CHLA02.txt",
+            sep = "\t",
+            quote = FALSE,
+            row.names = TRUE,
+            col.names = TRUE)
+```
+
+## CHLA05 ##
+############
+
+# Subset sample plan to keep only CHLA05 data
+
+```{r Subset_sample_plan}
+
+# Subset sample_plan
+sample_plan_SHH_DAPT_CHLA05 <- filter(.data=sample_plan_SHH_DAPT, 
+                                            Patient_ID %in% c("CHLA05")
+                                            )
+dim(sample_plan_SHH_DAPT)
+dim(sample_plan_SHH_DAPT_CHLA05)
+```
+
+# Subset TPM matrix to keep only CHLA05
+
+```{r Subset_TPM_matrix}
+
+# Subset TPM data matrix removing CHLA05
+TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA05 <- TPM_matrix_SHH_DAPT_Genes_of_interest[,sample_plan_SHH_DAPT_CHLA05$Sample_name]
+head(TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA05)
+```
+
+# Hierarchical clustering
+
+```{r Hierarchical_clustering}
+  
+# Top annotation creation - column
+TopAnnot_CHLA05 <- HeatmapAnnotation(df = sample_plan_SHH_DAPT_CHLA05["Treatment"],
+                              which = "column",
+                              col = list(Treatment = my_treatment_col_SHH)
+                              )
+
+# Top annotation creation - row
+RowAnnot <- HeatmapAnnotation(df = Genes_of_interest["Gene category"],
+                              which = "row",
+                              col = list(`Gene category` = col_gene_category),
+                              show_legend = FALSE
+                              
+                              )
+
+# Draw heatmap
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/clustering_SHH_DAPT_Genes_of_interest_CHLA05.jpg", width = 700, height = 600)
+
+Heatmap(matrix = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA05))),
+        top_annotation = TopAnnot_CHLA05,
+        right_annotation = RowAnnot,
+        cluster_rows = FALSE, # not perform clustering on the rows
+        row_split = Genes_of_interest$`Gene category`,
+        column_split = sample_plan_SHH_DAPT_CHLA05$Patient_ID,
+        row_names_side = "left",
+        row_title = levels(factor(Genes_of_interest$`Gene category`)),
+        show_column_names = FALSE,
+        row_title_side = "right",
+        row_title_rot = 0, # To have row titles horizontally
+        cluster_column_slices = FALSE,
+        row_names_gp = gpar(fontsize = 20),
+        row_title_gp = gpar(fontsize = 20),
+        column_title_gp = gpar(fontsize = 20)
+        )
+
+dev.off()
+```
+
+## PDX32 ##
+############
+
+# Subset sample plan to keep only PDX32 data
+
+```{r Subset_sample_plan}
+
+# Subset sample_plan
+sample_plan_SHH_DAPT_PDX32 <- filter(.data=sample_plan_SHH_DAPT, 
+                                            Patient_ID %in% c("PDX32")
+                                            )
+dim(sample_plan_SHH_DAPT)
+dim(sample_plan_SHH_DAPT_PDX32)
+```
+
+# Subset TPM matrix to keep only PDX32
+
+```{r Subset_TPM_matrix}
+
+# Subset TPM data matrix removing CHLA05
+TPM_matrix_SHH_DAPT_Genes_of_interest_PDX32 <- TPM_matrix_SHH_DAPT_Genes_of_interest[,sample_plan_SHH_DAPT_PDX32$Sample_name]
+head(TPM_matrix_SHH_DAPT_Genes_of_interest_PDX32)
+```
+
+# Hierarchical clustering PDX32
+
+```{r Hierarchical_clustering}
+  
+# Top annotation creation - column
+TopAnnot_PDX32 <- HeatmapAnnotation(df = sample_plan_SHH_DAPT_PDX32["Treatment"],
+                              which = "column",
+                              col = list(Treatment = my_treatment_col_SHH),
+                              annotation_legend_param = list(title = "Treatment", 
+                                                             title_gp = gpar(fontsize = 25),
+                                                             labels_gp = gpar(fontsize = 20))
+                                    )
+                              
+
+# Top annotation creation - row
+RowAnnot <- HeatmapAnnotation(df = Genes_of_interest["Gene category"],
+                              which = "row",
+                              col = list(`Gene category` = col_gene_category),
+                              show_legend = TRUE,
+                              show_annotation_name = FALSE,
+                              annotation_legend_param = list(title = "Gene category",
+                                                             at = levels(factor(Genes_of_interest$`Gene category`)),
+                                                             labels = c("Neuronal progenitor markers","Notch signaling pathway","Stem cell"),
+                                                             title_gp = gpar(fontsize = 25),
+                                                             labels_gp = gpar(fontsize = 20)
+                                                             )
+                              )
+
+# Draw heatmap
+
+heatmap <- Heatmap(matrix = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest_PDX32))),
+        top_annotation = TopAnnot_PDX32,
+        left_annotation = RowAnnot,
+        cluster_rows = FALSE, # not perform clustering on the rows
+        row_split = Genes_of_interest$Gene_category,
+        column_split = sample_plan_SHH_DAPT_PDX32$Patient_ID,
+        row_names_side = "right",
+        #row_title = levels(factor(Genes_of_interest$Gene_category)),
+        show_column_names = FALSE,
+        #row_title_side = "left",
+        #row_title_rot = 0, # To have row titles horizontally
+        row_title = NULL,
+        cluster_column_slices = FALSE,
+        row_names_gp = gpar(fontsize = 20),
+        row_title_gp = gpar(fontsize = 20),
+        column_title_gp = gpar(fontsize = 20),
+        heatmap_legend_param = list(title = "scaled log2(TPM+1)",
+                                    legend_height = unit(4, "cm"),
+                                    #title_position = "leftcenter-rot",
+                                    direction = "horizontal"
+                                    )
+        )
+
+jpeg(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figures/clustering_SHH_DAPT_Genes_of_interest_PDX32.jpg", width = 700, height = 600)
+draw(heatmap, heatmap_legend_side = "bottom", annotation_legend_side = "bottom", merge_legend = TRUE)
+dev.off()
+```
+
+# Extract TPM data for the paper PDX32
+
+```{r Extract_TPMdata_PDX32}
+
+write.table(x = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest_PDX32))),
+            file = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/TPM_data/TPM_data_PDX32.txt",
+            sep = "\t",
+            quote = FALSE,
+            row.names = TRUE,
+            col.names = TRUE)
+```
+
+###########################
+## FIGURES FOR THE PAPER ##
+###########################
+
+# Volcanoplot_CHLA02_for figure paper
+
+```{r Volcanoplot_CHLA02_for figure}
+
+volcano_CHLA02_DAPT_vs_DMSO <- ggplot(data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+                                       mapping = aes(x = log2FoldChange,
+                                                     y = -log10(padj)
+                                                     )
+       ) +
+  theme_classic() +
+  ggtitle("CHLA-02") +
+  geom_point(color = "grey",
+             size = 0.5) +
+  geom_hline(yintercept = -log10(0.05),
+             color = "forestgreen",
+             linetype = 2, # sinon "dotted"
+             size = 0.25
+             ) +
+  geom_vline(xintercept = c(-1,1),
+             color = "forestgreen",
+             linetype = 2,
+             size = 0.25
+             ) +
+  labs(x = expression(log[2](fold-change)), 
+       y = expression(-log[10](adj.p-value))
+       ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+                              log2FoldChange > 1,
+                              padj < 0.05),
+             color = "red",
+             alpha=0.4,
+             size=0.5
+             ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO,
+                              log2FoldChange < -1,
+                              padj < 0.05),
+             color = "dodgerblue",
+             alpha=0.4,
+             size=0.5
+             ) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 8, face = "bold"),
+        axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 7),
+        axis.title = element_text(size = 9)
+        ) +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos), x=2.5, y=100, color = "red", size = 3, fontface = "bold") +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg), x=-4, y=100, color = "dodgerblue", size = 3, fontface = "bold")
+
+volcano_CHLA02_DAPT_vs_DMSO
+```
+
+# Gene Ontology CHLA02 for figure paper
+
+```{r Gene_ontology_paper}
+
+GO_CHLA02_FCneg <- plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCneg.tsv",
+                                                   top               = 10,
+                                                   title             = "CHLA-02 \nRepressed genes",
+                                                   xlim              = 50,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "dodgerblue",
+                                                   format_labels     = TRUE, # TRUE to remove "_"
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 3.5,
+                                                   label_fontsize    = 4,
+                                                   wordsLength = 7
+                                      ) + theme(title = element_text(face = "bold",size = 7),
+                                                axis.title = element_text(size = 8),
+                                                axis.text.y = element_text(size = 4.5)
+                                                )
+
+
+GO_CHLA02_FCpos <- plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_CHLA02_DAPT_vs_DMSO_FCpos.tsv",
+                                                   top               = 10,
+                                                   title             = "CHLA-02 \nOverexpressed genes",
+                                                   xlim              = 12,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "red",
+                                                   format_labels     = TRUE,
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 3.5,
+                                                   label_fontsize    = 4,
+                                                   wordsLength = 7
+                                      ) + theme(title = element_text(face = "bold",size = 7),
+                                                axis.title = element_text(size = 8),
+                                                axis.text.y = element_text(size = 4.5)
+                                                )
+
+```
+
+# Volcanoplot_PDX32_for figure paper
+
+```{r Volcanoplot_PDX32_for figure}
+
+volcano_PDX32_DAPT_vs_DMSO <- ggplot(data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+                                       mapping = aes(x = log2FoldChange,
+                                                     y = -log10(padj)
+                                                     )
+       ) +
+  theme_classic() +
+  ggtitle("IC-032") +
+  geom_point(color = "grey",
+             size = 0.5) +
+  geom_hline(yintercept = -log10(0.05),
+             color = "forestgreen",
+             linetype = 2, # sinon "dotted"
+             size = 0.25
+          ) +
+  geom_vline(xintercept = c(-1,1),
+             color = "forestgreen",
+             linetype = 2,
+             size = 0.25
+             ) +
+  labs(x = expression(log[2](fold-change)), 
+       y = expression(-log[10](adj.p-value))
+       ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+                              log2FoldChange > 1,
+                              padj < 0.05),
+             color = "red",
+             alpha=0.4,
+             size=0.5
+             ) +
+  geom_point(data = filter(.data = res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO,
+                              log2FoldChange < -1,
+                              padj < 0.05),
+             color = "dodgerblue",
+             alpha=0.4,
+             size=0.5
+             ) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1.5, size = 8, face = "bold"),
+        axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 7),
+        axis.title = element_text(size = 9)
+        ) +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos), x=2, y=100,size = 3, color = "red", fontface = "bold") +
+  annotate(geom ="text", label=nrow(res_df_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg), x=-3, y=100,size = 3, color = "dodgerblue", fontface = "bold")
+
+volcano_PDX32_DAPT_vs_DMSO
+```
+
+# Gene Ontology PDX32 for figure paper
+
+```{r Gene_ontology_paper}
+
+GO_PDX32_FCneg <- plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCneg.tsv",
+                                                   top               = 10,
+                                                   title             = "IC-032 \nRepressed genes",
+                                                   xlim              = 40,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "dodgerblue",
+                                                   format_labels     = TRUE, # TRUE to remove "_"
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 3.5,
+                                                   label_fontsize    = 4,
+                                                   wordsLength = 7
+                                      ) + theme(title = element_text(face = "bold",size = 7),
+                                                axis.title = element_text(size = 8),
+                                                axis.text.y = element_text(size = 4.5)
+                                                )
+
+GO_PDX32_FCpos <- plot_top_MSigDB_enriched_geneSets_func(MSigDB_overlap_res = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Analyse differentielle-GO/overlap_SHH_DAPT_PDX32_DAPT_vs_DMSO_FCpos.tsv",
+                                                   top               = 10,
+                                                   title             = "IC-032 \nOverexpressed genes",
+                                                   xlim              = 12,
+                                                   sep               = "\t",
+                                                   quote             = NULL,
+                                                   selected_geneSet  = NULL,
+                                                   fill              = "red",
+                                                   format_labels     = TRUE, # TRUE to remove "_"
+                                                   prefixToremove = "GOBP",
+                                                   fontsize          = 3.5,
+                                                   label_fontsize    = 4,
+                                                   wordsLength = 7
+                                      ) + theme(title = element_text(face = "bold",size = 7),
+                                                axis.title = element_text(size = 8),
+                                                axis.text.y = element_text(size = 4.5)
+                                                )
+```
+
+# HEATMAP CHLA02 for paper
+
+```{r Hierarchical_clustering_paper}
+  
+# Top annotation creation - column
+TopAnnot_CHLA02 <- HeatmapAnnotation(df = sample_plan_SHH_DAPT_CHLA02["Treatment"],
+                              which = "column",
+                              col = list(Treatment = my_treatment_col_SHH),
+                              annotation_name_gp = gpar(fontsize = 9,fontface  = "bold"),
+                              annotation_legend_param = list(title = "Treatment", 
+                                                             title_gp = gpar(fontsize = 25),
+                                                             labels_gp = gpar(fontsize = 20))#,
+                              #show_legend = FALSE,
+                              )
+
+# Top annotation creation - row
+RowAnnot <- HeatmapAnnotation(df = Genes_of_interest["Gene category"],
+                              which = "row",
+                              col = list(`Gene category` = col_gene_category),
+                              show_legend = FALSE,
+                              show_annotation_name = FALSE
+                              )
+
+# Draw heatmap
+heatmap <- Heatmap(matrix = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest_CHLA02))),
+        top_annotation = TopAnnot_CHLA02,
+        left_annotation = RowAnnot,
+        cluster_rows = FALSE, # not perform clustering on the rows
+        row_split = Genes_of_interest$`Gene category`,
+        column_title = "CHLA-02", 
+        #column_split = sample_plan_SHH_DAPT_CHLA02$Patient_ID,
+        row_names_side = "right",
+        #row_title = levels(factor(Genes_of_interest$`Gene category`)),
+        show_column_names = FALSE,
+        #row_title_side = "left",
+        #row_title_rot = 0, # To have row titles horizontally
+        row_title = NULL,
+        cluster_column_slices = FALSE,
+        row_names_gp = gpar(fontsize = 8, fontface = 3),
+        #row_title_gp = gpar(fontsize = 20),
+        column_title_gp = gpar(fontsize = 10,fontface  = "bold"),
+        heatmap_legend_param = list(title = "scaled \nlog2(TPM+1)",
+                                    legend_height = unit(3, "cm"),
+                                    title_gp = gpar(fontsize = 8)#,
+                                    #title_position = "leftcenter-rot",
+                                    #direction = "horizontal"
+                                    )
+        )
+
+Heatmap_CHLA02 <- grid.grabExpr(draw(heatmap,show_annotation_legend = FALSE))
+
+```
+
+# HEATMAP PDX32 for paper
+
+```{r Hierarchical_clustering_paper}
+  
+# Top annotation creation - column
+TopAnnot_PDX32 <- HeatmapAnnotation(df = sample_plan_SHH_DAPT_PDX32["Treatment"],
+                              which = "column",
+                              col = list(Treatment = my_treatment_col_SHH),
+                              annotation_name_gp = gpar(fontsize = 9,fontface  = "bold"),
+                              annotation_legend_param = list(title = "Treatment", 
+                                                             title_gp = gpar(fontsize = 20),
+                                                             labels_gp = gpar(fontsize = 20))#,
+                              #show_legend = FALSE,
+                              )
+                              
+
+# Top annotation creation - row
+RowAnnot <- HeatmapAnnotation(df = Genes_of_interest["Gene category"],
+                              which = "row",
+                              col = list(`Gene category` = col_gene_category),
+                              show_legend = FALSE,
+                              show_annotation_name = FALSE
+                              )
+
+# Draw heatmap
+
+heatmap <- Heatmap(matrix = t(scale(t(TPM_matrix_SHH_DAPT_Genes_of_interest_PDX32))),
+        top_annotation = TopAnnot_PDX32,
+        left_annotation = RowAnnot,
+        cluster_rows = FALSE, # not perform clustering on the rows
+        row_split = Genes_of_interest$`Gene category`,
+        column_title = "IC-032", 
+        #column_split = sample_plan_SHH_DAPT_PDX32$Patient_ID,
+        row_names_side = "right",
+        #row_title = levels(factor(Genes_of_interest$`Gene category`)),
+        show_column_names = FALSE,
+        #row_title_side = "left",
+        #row_title_rot = 0, # To have row titles horizontally
+        row_title = NULL,
+        cluster_column_slices = FALSE,
+        row_names_gp = gpar(fontsize = 8,fontface = 3),
+        #row_title_gp = gpar(fontsize = 20),
+        column_title_gp = gpar(fontsize = 10,fontface  = "bold"),
+        heatmap_legend_param = list(title = "scaled \nlog2(TPM+1)",
+                                    legend_height = unit(3, "cm"),
+                                    title_gp = gpar(fontsize = 8)#,
+                                    #title_position = "leftcenter-rot",
+                                    #direction = "horizontal"
+                                    )
+        )
+
+Heatmap_PDX32 <- grid.grabExpr(draw(heatmap,show_annotation_legend = FALSE))
+
+```
+
+# Create packed legend
+
+```{r create_packed_legend}
+
+Gene_category <- c("Neuronal progenitor markers","NOTCH signaling pathway","Stem cell")
+
+# Create Gene_category legends
+lgd_Gene_category <- Legend(labels                    = Gene_category,
+                            title                     = "Gene category",
+                            legend_gp                 = gpar(fill = col_gene_category[Gene_category]
+                                                             ),
+                            title_gp                  = gpar(fontsize = 6*1.5,
+                                                             fontface  = "bold"
+                                                             ),
+                            labels_gp                 = gpar(fontsize = 6*1.5
+                                                             ),
+                            grid_height               = unit(0.5,"cm"),
+                            grid_width                = unit(0.5,"cm"),
+                            nrow                      = 1,
+                            gap                       = unit(0.5,"cm")
+                            )
+lgd_Gene_category_grab <- grid.grabExpr(draw(lgd_Gene_category))
+
+# Create Treatment legends
+lgd_Treatment <- Legend(labels                    = levels(factor(sample_plan_SHH_DAPT$Treatment)),
+                            title                     = "Treatment",
+                            legend_gp                 = gpar(fill = my_treatment_col_SHH[levels(factor(sample_plan_SHH_DAPT$Treatment))]
+                                                             ),
+                            title_gp                  = gpar(fontsize = 6*1.5,
+                                                             fontface  = "bold"
+                                                             ),
+                            labels_gp                 = gpar(fontsize = 6*1.5
+                                                             ),
+                            grid_height               = unit(0.5,"cm"),
+                            grid_width                = unit(0.5,"cm"),
+                            nrow                      = 1,
+                            gap                       = unit(0.5,"cm")
+                            )
+lgd_Treatment_grab <- grid.grabExpr(draw(lgd_Treatment))
+
+# Create 
+legends_heatmap <- packLegend(list = list(lgd_Gene_category,
+                                          lgd_Treatment
+                                           ),
+                                                   direction = "vertical",
+                                                   column_gap = unit(1,"cm")
+                                                   )
+legends_heatmap <- grid.grabExpr(draw(legends_heatmap))
+
+```
+
+# FIGURE FOR THE PAPER 
+
+```{r Figure_for_paper}
+
+figure8_A <- image_read("C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figure_papier/Westernblot.jpg")
+figure8_A <- ggplot() +
+  background_image(figure8_A)
+figure8_A <- wrap_plots(figure8_A) + labs(tag = 'A')
+
+figure8_BCD <- wrap_plots(wrap_plots(volcano_CHLA02_DAPT_vs_DMSO) + labs(tag = 'B'),
+                          wrap_plots(GO_CHLA02_FCneg) + labs(tag = 'C'),
+                          wrap_plots(GO_CHLA02_FCpos) + labs(tag = 'D'),
+                          widths = c(0.7,0.15,0.15)
+                          )
+
+figure8_EFG <- wrap_plots(wrap_plots(volcano_PDX32_DAPT_vs_DMSO) + labs(tag = 'E'),
+                          wrap_plots(GO_PDX32_FCneg) + labs(tag = 'F'),
+                          wrap_plots(GO_PDX32_FCpos) + labs(tag = 'G'),
+                          widths = c(0.7,0.15,0.15)
+                         )
+           
+figure8_HI <- wrap_plots(wrap_plots(Heatmap_CHLA02) + labs(tag = 'H'),
+                         wrap_plots(Heatmap_PDX32) + labs(tag = 'I'),
+                         widths = c(0.5,0.5)
+                         )
+
+figure8 <- wrap_plots(A = figure8_A,
+                      B = figure8_BCD,
+                      C = figure8_EFG,
+                      D = figure8_HI,
+                      E = legends_heatmap,
+                      heights = c(0.15,0.225,0.225,0.29,0.11),
+                      design = "A###
+                                BBBB
+                                CCCC
+                                DDDD
+                                EEEE"
+                      ) &
+    theme(text = element_text(face = 'bold',size = 9),
+          plot.tag = element_text(size = 20, face = 'bold', vjust = 5)
+          ) &
+    plot_annotation(title = "Figure 8",
+                    theme = theme(plot.margin = unit(c(1,1,1,1),'cm'),
+                                  text = element_text(size = 20)
+                                  )
+                    )
+
+ggsave(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figure_papier/Figure_Notchinhibitor.pdf",
+       plot = figure8, 
+       width = 210,
+       height = 297,
+       units = "mm"
+)
+       
+```
+
+# FIGURE FOR THE PAPER - bis
+
+```{r Figure_paper}
+figure8_A <- image_read("C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figure_papier/Westernblot.jpg")
+figure8_A <- ggplot() +
+  background_image(figure8_A)
+
+figure8_ABC <- wrap_plots(wrap_elements(figure8_A) + labs(tag = 'A'),
+                          wrap_elements(volcano_CHLA02_DAPT_vs_DMSO) + labs(tag = 'B'),
+                          wrap_elements(volcano_PDX32_DAPT_vs_DMSO) + labs(tag = 'C'),
+                          widths = c(0.3,0.35,0.35)
+                          )
+
+figure8_DE <- wrap_plots(wrap_elements(GO_CHLA02_FCneg) + labs(tag = 'D'),
+                         wrap_elements(GO_CHLA02_FCpos) + labs(tag = 'E'),
+                         widths = c(0.5,0.5)
+                        )
+
+figure8_FG <- wrap_plots(wrap_elements(GO_PDX32_FCneg) + labs(tag = 'F'),
+                         wrap_elements(GO_PDX32_FCpos) + labs(tag = 'G'),
+                         widths = c(0.5,0.5)
+                         )
+           
+figure8_HI <- wrap_plots(wrap_elements(Heatmap_CHLA02) + labs(tag = 'H'),
+                         wrap_elements(Heatmap_PDX32) + labs(tag = 'I'),
+                         widths = c(0.5,0.5)
+                         )
+
+figure8bis <- wrap_plots(A = figure8_ABC,
+                      B = figure8_DE,
+                      C = figure8_FG,
+                      D = figure8_HI,
+                      E = legends_heatmap,
+                      heights = c(0.17,0.215,0.215,0.3,0.1),
+                      design = "AAAA
+                                BBBB
+                                CCCC
+                                DDDD
+                                EEEE"
+                      ) &
+    theme(text = element_text(face = 'bold',size = 9),
+          plot.tag = element_text(size = 20, face = 'bold', vjust = -2, hjust = 5)
+          ) &
+    plot_annotation(title = "Figure 8",
+                    theme = theme(plot.margin = unit(c(1,1,1,1),'cm'),
+                                  text = element_text(size = 20)
+                                  )
+                    )
+
+ggsave(filename = "C:/Users/Céline/Documents/Celine/R/Analyses_RNAseq/SHH_cellLines_DAPT/Figure_papier/Figure8_final.pdf",
+       plot = figure8bis, 
+       width = 210,
+       height = 297,
+       units = "mm"
+)
+```
+
+
